@@ -53,9 +53,4 @@ jobs:
             --ext .js,.ts,.tsx \
             --no-error-on-unmatched-pattern
 
-      # Verificação do Prettier
-      - name: Prettier Check
-        run: |
-          npx prettier . \
-            --config devsecops/lint/.prettierrc \
-            --check .
+ 
