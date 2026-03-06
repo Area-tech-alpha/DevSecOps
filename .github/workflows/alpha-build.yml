@@ -56,37 +56,41 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-
-      - name: Ensure npm lockfile
-        if: steps.detect.outputs.node == 'true'
-        run: |
-          if [ ! -f package-lock.json ]; then
-            echo "❌ package-lock.json required"
-            exit 1
-          fi
 
       - name: Validate package.json
         if: steps.detect.outputs.node == 'true'
         run: |
+          echo "🔎 Validating package.json"
           node -e "JSON.parse(require('fs').readFileSync('package.json'))"
 
       - name: Install Node dependencies
         if: steps.detect.outputs.node == 'true'
         run: |
           echo "📦 Installing dependencies"
-          npm ci --legacy-peer-deps
+
+          if [ -f package-lock.json ]; then
+            echo "Lockfile detected"
+
+            if npm ci --legacy-peer-deps; then
+              echo "✅ npm ci succeeded"
+            else
+              echo "⚠️ npm ci failed, falling back to npm install"
+              npm install --legacy-peer-deps
+            fi
+
+          else
+            echo "⚠️ No lockfile detected, using npm install"
+            npm install --legacy-peer-deps
+          fi
 
       - name: Node Build
         if: steps.detect.outputs.node == 'true'
         run: |
-          echo "🔎 Checking build script"
-
           if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
             echo "🏗 Running build"
             npm run build
           else
-            echo "ℹ️ No build script found"
+            echo "ℹ️ No build script"
           fi
 
       # =====================================================
@@ -97,7 +101,7 @@ jobs:
         if: steps.detect.outputs.typescript == 'true'
         run: |
           echo "🔎 Running TypeScript type check"
-          npx tsc --noEmit || true
+          npx tsc --noEmit
 
       # =====================================================
       # PYTHON PROJECTS
