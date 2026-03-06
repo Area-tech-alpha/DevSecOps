@@ -12,11 +12,12 @@ permissions:
 
 jobs:
   build:
-    name: Project Build
+    name: Universal Build
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
+
       # --------------------------------
       # Checkout
       # --------------------------------
@@ -26,30 +27,37 @@ jobs:
       # --------------------------------
       # Detect project type
       # --------------------------------
-      - name: Detect project
+      - name: Detect project type
         id: detect
         run: |
+
           if [ -f package.json ]; then
             echo "node=true" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -f requirements.txt ] || [ -f pyproject.toml ]; then
+            echo "python=true" >> $GITHUB_OUTPUT
           fi
 
           if [ -f Dockerfile ]; then
             echo "docker=true" >> $GITHUB_OUTPUT
           fi
 
-      # --------------------------------
-      # Setup Node
-      # --------------------------------
+          if [ -f tsconfig.json ]; then
+            echo "typescript=true" >> $GITHUB_OUTPUT
+          fi
+
+      # =====================================================
+      # NODE PROJECTS
+      # =====================================================
+
       - name: Setup Node
         if: steps.detect.outputs.node == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # --------------------------------
-      # Ensure lockfile
-      # --------------------------------
-      - name: Ensure lockfile
+      - name: Ensure npm lockfile
         if: steps.detect.outputs.node == 'true'
         run: |
           if [ ! -f package-lock.json ]; then
@@ -57,44 +65,91 @@ jobs:
             exit 1
           fi
 
-      # --------------------------------
-      # Install dependencies
-      # --------------------------------
-      - name: Install dependencies
+      - name: Install Node dependencies
         if: steps.detect.outputs.node == 'true'
         run: npm ci
 
-      # --------------------------------
-      # Validate package.json
-      # --------------------------------
       - name: Validate package.json
         if: steps.detect.outputs.node == 'true'
         run: |
           node -e "JSON.parse(require('fs').readFileSync('package.json'))"
 
-      # --------------------------------
-      # Type check (TS)
-      # --------------------------------
-      - name: Type Check
-        if: hashFiles('**/tsconfig.json') != ''
-        run: npx tsc --noEmit
-
-      # --------------------------------
-      # Build project
-      # --------------------------------
-      - name: Build
+      - name: Node Build
         if: steps.detect.outputs.node == 'true'
         run: |
           if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
-            echo "🏗 Running build..."
+            echo "🏗 Running build"
             npm run build
           else
             echo "ℹ️ No build script"
           fi
 
-      # --------------------------------
-      # Docker build validation
-      # --------------------------------
+      # =====================================================
+      # TYPESCRIPT
+      # =====================================================
+
+      - name: Type Check
+        if: steps.detect.outputs.typescript == 'true'
+        run: |
+          echo "🔎 Running TypeScript type check"
+          npx tsc --noEmit
+
+      # =====================================================
+      # PYTHON PROJECTS
+      # =====================================================
+
+      - name: Setup Python
+        if: steps.detect.outputs.python == 'true'
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        if: steps.detect.outputs.python == 'true'
+        run: |
+          python -m pip install --upgrade pip
+
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+
+      - name: Install Python dev tools
+        if: steps.detect.outputs.python == 'true'
+        run: |
+          pip install ruff bandit pip-audit pytest
+
+      - name: Python Lint
+        if: steps.detect.outputs.python == 'true'
+        run: |
+          ruff check .
+
+      - name: Python Security Scan
+        if: steps.detect.outputs.python == 'true'
+        run: |
+          if [ -d src ]; then
+            bandit -r src -ll
+          else
+            bandit -r . -ll
+          fi
+
+      - name: Python Dependency Audit
+        if: steps.detect.outputs.python == 'true'
+        run: |
+          pip-audit --progress-spinner=off
+
+      - name: Python Tests
+        if: steps.detect.outputs.python == 'true'
+        run: |
+          if [ -d tests ]; then
+            pytest -q
+          else
+            echo "ℹ️ No tests found"
+          fi
+
+      # =====================================================
+      # DOCKER PROJECTS
+      # =====================================================
+
       - name: Docker Build
         if: steps.detect.outputs.docker == 'true'
         run: |
