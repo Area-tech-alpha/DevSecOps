@@ -7,7 +7,6 @@ on:
     branches:
       - main
 
-
 permissions:
   contents: read
 
@@ -34,6 +33,10 @@ jobs:
             echo "docker=true" >> $GITHUB_OUTPUT
           fi
 
+          if [ -f package-lock.json ]; then
+            echo "lockfile=true" >> $GITHUB_OUTPUT
+          fi
+
       # --------------------------------
       # Node setup
       # --------------------------------
@@ -42,11 +45,28 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      # --------------------------------
+      # NPM cache (only if lockfile exists)
+      # --------------------------------
+      - name: Enable npm cache
+        if: steps.detect.outputs.lockfile == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
           cache: npm
 
+      # --------------------------------
+      # Install dependencies
+      # --------------------------------
       - name: Install dependencies
         if: steps.detect.outputs.node == 'true'
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       # --------------------------------
       # Type check (TS)
@@ -72,5 +92,4 @@ jobs:
       # --------------------------------
       - name: Docker Build
         if: steps.detect.outputs.docker == 'true'
-        run: |
-          docker build -t alpha-ci-test .
+        run: docker build -t alpha-ci-test .
