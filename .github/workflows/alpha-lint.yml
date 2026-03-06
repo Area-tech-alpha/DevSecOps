@@ -2,6 +2,7 @@ name: Alpha Lint
 
 on:
   workflow_call:
+
   pull_request:
     branches:
       - main
@@ -14,41 +15,45 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Repo que está sendo testado
+      # Checkout do repositório que está sendo validado
       - name: Checkout Target Repo
         uses: actions/checkout@v4
 
-      # Repo DevSecOps com as configs
+      # Checkout do repositório central DevSecOps
       - name: Checkout DevSecOps Config
         uses: actions/checkout@v4
         with:
-          repository: ORG/DevSecOps
+          repository: Area-tech-alpha/DevSecOps
+          ref: main
           path: devsecops
+          fetch-depth: 1
 
-      # Setup node
+      # Setup Node
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # Instala ESLint isolado
-      - name: Install ESLint
+      # Instala ESLint e Prettier isolados
+      - name: Install Lint Dependencies
         run: |
-          npm install \
-          eslint \
-          @eslint/js \
-          typescript-eslint \
-          eslint-config-prettier \
-          prettier
+          npm install --no-save \
+            eslint \
+            @eslint/js \
+            typescript \
+            typescript-eslint \
+            eslint-config-prettier \
+            prettier
 
-      # Run lint usando config central
+      # Executa ESLint usando configuração central
       - name: Run ESLint
         run: |
           npx eslint . \
             --config devsecops/lint-config/eslint.config.mjs \
-            --ext .js,.ts,.tsx
+            --ext .js,.ts,.tsx \
+            --no-error-on-unmatched-pattern
 
-      # Prettier check
+      # Verificação do Prettier
       - name: Prettier Check
         run: |
           npx prettier . \
