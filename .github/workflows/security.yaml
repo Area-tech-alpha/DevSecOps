@@ -9,8 +9,6 @@ on:
       - develop
       - "*"
 
-  merge_queue:
-
 permissions:
   contents: read
   security-events: write
