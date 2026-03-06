@@ -1,0 +1,41 @@
+name: Alpha Security
+
+on:
+  workflow_call:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Secrets
+      - name: Gitleaks
+        run: |
+          docker run --rm \
+          -v ${{ github.workspace }}:/repo \
+          ghcr.io/gitleaks/gitleaks:latest \
+          detect --source="/repo" --redact -v
+
+      # SAST
+      - name: Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: p/security-audit
+
+      # Dependency scan
+      - name: OSV Scanner
+        run: |
+          docker run --rm \
+          -v ${{ github.workspace }}:/repo \
+          ghcr.io/google/osv-scanner:latest \
+          scan /repo
+
+      # NPM vulnerabilities
+      - name: NPM Audit
+        run: npm audit --audit-level=high
