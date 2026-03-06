@@ -1,0 +1,78 @@
+name: Alpha Build
+
+on:
+  workflow_call:
+
+  pull_request:
+    branches:
+      - main
+
+
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Project Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # --------------------------------
+      # Detect project type
+      # --------------------------------
+      - name: Detect project
+        id: detect
+        run: |
+          if [ -f package.json ]; then
+            echo "node=true" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -f Dockerfile ]; then
+            echo "docker=true" >> $GITHUB_OUTPUT
+          fi
+
+      # --------------------------------
+      # Node setup
+      # --------------------------------
+      - name: Setup Node
+        if: steps.detect.outputs.node == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.detect.outputs.node == 'true'
+        run: npm ci
+
+      # --------------------------------
+      # Type check (TS)
+      # --------------------------------
+      - name: Type Check
+        if: hashFiles('**/tsconfig.json') != ''
+        run: npx tsc --noEmit
+
+      # --------------------------------
+      # Build project
+      # --------------------------------
+      - name: Build
+        if: steps.detect.outputs.node == 'true'
+        run: |
+          if npm run | grep -q "build"; then
+            npm run build
+          else
+            echo "No build script"
+          fi
+
+      # --------------------------------
+      # Docker build validation
+      # --------------------------------
+      - name: Docker Build
+        if: steps.detect.outputs.docker == 'true'
+        run: |
+          docker build -t alpha-ci-test .

@@ -1,0 +1,43 @@
+name: Alpha Lint
+
+on:
+  workflow_call:
+
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Setup Node
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Install dependencies if Node project
+      - name: Install dependencies
+        if: hashFiles('**/package.json') != ''
+        run: npm install --ignore-scripts
+
+      # Download org lint config
+      - name: Fetch Alpha lint config
+        run: |
+          curl -sL https://raw.githubusercontent.com/${{ github.repository_owner }}/.github/main/lint-config/eslint.config.js -o eslint.config.js
+
+      # Run ESLint
+      - name: Run ESLint
+        if: hashFiles('**/*.ts', '**/*.js') != ''
+        run: |
+          npx eslint . \
+            --config eslint.config.js \
+            --max-warnings=0
