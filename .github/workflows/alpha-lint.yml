@@ -7,37 +7,52 @@ on:
     branches:
       - main
 
+
 permissions:
   contents: read
 
 jobs:
   lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      # Repo que está sendo testado
+      - name: Checkout Target Repo
+        uses: actions/checkout@v4
 
-      # Setup Node
+      # Repo DevSecOps com as configs
+      - name: Checkout DevSecOps Config
+        uses: actions/checkout@v4
+        with:
+          repository: ORG/alpha-devsecops
+          path: devsecops
+
+      # Setup node
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # Install dependencies if Node project
-      - name: Install dependencies
-        if: hashFiles('**/package.json') != ''
-        run: npm install --ignore-scripts
-
-      # Download org lint config
-      - name: Fetch Alpha lint config
+      # Instala ESLint isolado
+      - name: Install ESLint
         run: |
-          curl -sL https://raw.githubusercontent.com/${{ github.repository_owner }}/.github/main/lint-config/eslint.config.js -o eslint.config.js
+          npm install \
+          eslint \
+          @eslint/js \
+          typescript-eslint \
+          eslint-config-prettier \
+          prettier
 
-      # Run ESLint
+      # Run lint usando config central
       - name: Run ESLint
-        if: hashFiles('**/*.ts', '**/*.js') != ''
         run: |
           npx eslint . \
-            --config eslint.config.js \
-            --max-warnings=0
+            --config devsecops/lint-config/eslint.config.mjs \
+            --ext .js,.ts,.tsx
+
+      # Prettier check
+      - name: Prettier Check
+        run: |
+          npx prettier . \
+            --config devsecops/lint/.prettierrc \
+            --check
