@@ -3,18 +3,39 @@ name: Alpha Security
 on:
   workflow_call:
 
+  pull_request:
+    branches:
+      - main
+      - develop
+      - "*"
+
+  merge_queue:
+
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   security:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Secrets
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies (if package.json exists)
+        run: |
+          if [ -f package.json ]; then
+            npm install --ignore-scripts
+          fi
+
       - name: Gitleaks
         run: |
           docker run --rm \
@@ -22,13 +43,11 @@ jobs:
           ghcr.io/gitleaks/gitleaks:latest \
           detect --source="/repo" --redact -v
 
-      # SAST
       - name: Semgrep
         uses: semgrep/semgrep-action@v1
         with:
           config: p/security-audit
 
-      # Dependency scan
       - name: OSV Scanner
         run: |
           docker run --rm \
@@ -36,6 +55,6 @@ jobs:
           ghcr.io/google/osv-scanner:latest \
           scan /repo
 
-      # NPM vulnerabilities
       - name: NPM Audit
+        if: hashFiles('**/package-lock.json') != ''
         run: npm audit --audit-level=high
