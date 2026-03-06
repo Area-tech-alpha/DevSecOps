@@ -7,7 +7,6 @@ on:
     branches:
       - main
 
-
 permissions:
   contents: read
 
@@ -16,43 +15,37 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Repo que está sendo testado
+      # Checkout do repositório que está sendo testado
       - name: Checkout Target Repo
         uses: actions/checkout@v4
 
-      # Repo DevSecOps com as configs
-      - name: Checkout DevSecOps Config
-        uses: actions/checkout@v4
-        with:
-          repository: ORG/DevSecOps
-          path: devsecops
-
-      # Setup node
+      # Setup Node
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # Instala ESLint isolado
-      - name: Install ESLint
+      # Instala ferramentas de lint isoladas
+      - name: Install Lint Tooling
         run: |
           npm install \
-          eslint \
-          @eslint/js \
-          typescript-eslint \
-          eslint-config-prettier \
-          prettier
+            eslint \
+            @eslint/js \
+            typescript-eslint \
+            eslint-config-prettier \
+            prettier
 
-      # Run lint usando config central
+      # ESLint usando config central do DevSecOps
       - name: Run ESLint
         run: |
           npx eslint . \
-            --config devsecops/lint-config/eslint.config.mjs \
+            --config ./lint/eslint.config.mjs \
+            --no-eslintrc \
             --ext .js,.ts,.tsx
 
       # Prettier check
       - name: Prettier Check
         run: |
           npx prettier . \
-            --config devsecops/lint/.prettierrc \
+            --config ./lint/.prettierrc \
             --check
