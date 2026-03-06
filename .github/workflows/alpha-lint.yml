@@ -49,7 +49,7 @@ jobs:
       - name: Run ESLint
         run: |
           npx eslint . \
-            --config devsecops/lint-config/eslint.config.mjs \
+            --config devsecops/lint/eslint.config.mjs \
             --ext .js,.ts,.tsx \
             --no-error-on-unmatched-pattern
 
