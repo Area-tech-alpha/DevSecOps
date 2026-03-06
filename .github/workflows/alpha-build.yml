@@ -17,7 +17,10 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Checkout
+      # --------------------------------
+      # Checkout
+      # --------------------------------
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       # --------------------------------
@@ -35,7 +38,16 @@ jobs:
           fi
 
       # --------------------------------
-      # Ensure lockfile (security)
+      # Setup Node
+      # --------------------------------
+      - name: Setup Node
+        if: steps.detect.outputs.node == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # --------------------------------
+      # Ensure lockfile
       # --------------------------------
       - name: Ensure lockfile
         if: steps.detect.outputs.node == 'true'
@@ -46,21 +58,19 @@ jobs:
           fi
 
       # --------------------------------
-      # Setup Node
-      # --------------------------------
-      - name: Setup Node
-        if: steps.detect.outputs.node == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      # --------------------------------
       # Install dependencies
       # --------------------------------
       - name: Install dependencies
         if: steps.detect.outputs.node == 'true'
         run: npm ci
+
+      # --------------------------------
+      # Validate package.json
+      # --------------------------------
+      - name: Validate package.json
+        if: steps.detect.outputs.node == 'true'
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('package.json'))"
 
       # --------------------------------
       # Type check (TS)
@@ -75,7 +85,8 @@ jobs:
       - name: Build
         if: steps.detect.outputs.node == 'true'
         run: |
-          if npm run | grep -q "build"; then
+          if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
+            echo "🏗 Running build..."
             npm run build
           else
             echo "ℹ️ No build script"
@@ -86,4 +97,6 @@ jobs:
       # --------------------------------
       - name: Docker Build
         if: steps.detect.outputs.docker == 'true'
-        run: docker build -t alpha-ci-test .
+        run: |
+          echo "🐳 Validating Docker build"
+          docker build -t alpha-ci-test .
