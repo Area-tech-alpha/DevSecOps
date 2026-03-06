@@ -17,7 +17,8 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       # --------------------------------
       # Detect project type
@@ -33,24 +34,22 @@ jobs:
             echo "docker=true" >> $GITHUB_OUTPUT
           fi
 
-          if [ -f package-lock.json ]; then
-            echo "lockfile=true" >> $GITHUB_OUTPUT
+      # --------------------------------
+      # Ensure lockfile (security)
+      # --------------------------------
+      - name: Ensure lockfile
+        if: steps.detect.outputs.node == 'true'
+        run: |
+          if [ ! -f package-lock.json ]; then
+            echo "❌ package-lock.json required"
+            exit 1
           fi
 
       # --------------------------------
-      # Node setup
+      # Setup Node
       # --------------------------------
       - name: Setup Node
         if: steps.detect.outputs.node == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      # --------------------------------
-      # NPM cache (only if lockfile exists)
-      # --------------------------------
-      - name: Enable npm cache
-        if: steps.detect.outputs.lockfile == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -61,12 +60,7 @@ jobs:
       # --------------------------------
       - name: Install dependencies
         if: steps.detect.outputs.node == 'true'
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+        run: npm ci
 
       # --------------------------------
       # Type check (TS)
@@ -84,7 +78,7 @@ jobs:
           if npm run | grep -q "build"; then
             npm run build
           else
-            echo "No build script"
+            echo "ℹ️ No build script"
           fi
 
       # --------------------------------
