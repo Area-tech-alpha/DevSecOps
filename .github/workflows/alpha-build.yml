@@ -72,6 +72,9 @@ jobs:
           else
             npm install --legacy-peer-deps
           fi
+        env:
+          # Necessário para projetos que usam @nestjs/axios >= 4 com terminus <= 10
+          NODE_OPTIONS: "--max-old-space-size=4096"
 
       # --------------------------------
       # Prisma (auto detect)
@@ -79,6 +82,10 @@ jobs:
 
       - name: Generate Prisma Client
         if: steps.detect.outputs.node == 'true'
+        env:
+          # DATABASE_URL dummy — prisma generate só lê o schema, não conecta ao banco.
+          # Sem isso, projetos que carregam prisma.config.ts/js falham com PrismaConfigEnvError.
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_dummy"
         run: |
           if [ -f prisma/schema.prisma ]; then
             echo "⚡ Generating Prisma Client"

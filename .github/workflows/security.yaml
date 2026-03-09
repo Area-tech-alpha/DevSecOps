@@ -28,9 +28,15 @@ jobs:
           node-version: "20"
 
       - name: Install dependencies (if package.json exists)
+        # --legacy-peer-deps: resolve conflito @nestjs/axios >=4 vs @nestjs/terminus <=10
+        # --ignore-scripts: previne execução de scripts de build/postinstall (segurança)
         run: |
           if [ -f package.json ]; then
-            npm install --ignore-scripts
+            if [ -f package-lock.json ]; then
+              npm ci --legacy-peer-deps --ignore-scripts || npm install --legacy-peer-deps --ignore-scripts
+            else
+              npm install --legacy-peer-deps --ignore-scripts
+            fi
           fi
 
       - name: Gitleaks
