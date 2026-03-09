@@ -118,6 +118,19 @@ jobs:
           fi
 
       # --------------------------------
+      # Build App (Se necessário para o WebServer de E2E)
+      # --------------------------------
+      - name: Build Project
+        if: steps.detect.outputs.framework != 'none'
+        run: |
+          if node -e "process.exit(require('./package.json').scripts?.['build'] ? 0 : 1)" 2>/dev/null; then
+            echo "🏗 Encontrado script de build, executando (necessário para o WebServer local)..."
+            npm run build
+          else
+            echo "ℹ️ Nenhum script de build encontrado."
+          fi
+
+      # --------------------------------
       # Execution
       # --------------------------------
       - name: Run E2E Tests
