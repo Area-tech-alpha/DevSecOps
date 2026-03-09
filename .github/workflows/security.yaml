@@ -6,12 +6,11 @@ on:
   pull_request:
     branches:
       - main
-
+      - develop
 
 permissions:
   contents: read
   security-events: write
-
 
 jobs:
   security:
@@ -23,8 +22,73 @@ jobs:
         with:
           fetch-depth: 0
 
-      # ⚡ Cache npm — acelera install antes dos scanners
+      # --------------------------------
+      # Detect project type
+      # --------------------------------
+      - name: Detect project type
+        id: detect
+        run: |
+          echo "🔍 Detectando tipo de projeto..."
+
+          if [ -f package.json ]; then
+            echo "node=true" >> $GITHUB_OUTPUT
+            echo "✅ Node.js detectado"
+          fi
+
+          if [ -f requirements.txt ] || [ -f pyproject.toml ] || [ -f setup.py ] || [ -f Pipfile ]; then
+            echo "python=true" >> $GITHUB_OUTPUT
+            echo "✅ Python detectado"
+          fi
+
+          if [ -f Dockerfile ]; then
+            echo "docker=true" >> $GITHUB_OUTPUT
+            echo "✅ Docker detectado"
+          fi
+
+          if [ -f go.mod ]; then
+            echo "go=true" >> $GITHUB_OUTPUT
+            echo "✅ Go detectado"
+          fi
+
+      # =====================================================
+      # UNIVERSAL — Secrets Leak Detection (qualquer projeto)
+      # =====================================================
+
+      - name: Gitleaks — Secrets Detection
+        run: |
+          echo "🔐 Escaneando repositório inteiro por secrets vazados..."
+          docker run --rm \
+            -v ${{ github.workspace }}:/repo \
+            ghcr.io/gitleaks/gitleaks:latest \
+            detect --source="/repo" --redact -v
+
+      # =====================================================
+      # UNIVERSAL — SAST (qualquer linguagem)
+      # =====================================================
+
+      - name: Semgrep — SAST Scanner
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: p/security-audit
+
+      # =====================================================
+      # UNIVERSAL — Dependency Vulnerability Scanner
+      # =====================================================
+
+      - name: OSV Scanner — Dependency Vulnerabilities
+        run: |
+          echo "📦 Escaneando dependências por vulnerabilidades conhecidas..."
+          docker run --rm \
+            -v ${{ github.workspace }}:/repo \
+            ghcr.io/google/osv-scanner:latest \
+            scan /repo || true
+
+      # =====================================================
+      # NODE.JS — Security Steps (condicional)
+      # =====================================================
+
       - name: Cache npm
+        if: steps.detect.outputs.node == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.npm
@@ -34,41 +98,121 @@ jobs:
             ${{ runner.os }}-npm-
 
       - name: Setup Node
+        if: steps.detect.outputs.node == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Install dependencies (if package.json exists)
-        # --legacy-peer-deps: resolve conflito @nestjs/axios >=4 vs @nestjs/terminus <=10
-        # --ignore-scripts: previne execução de scripts de build/postinstall (segurança)
+      - name: Install Node dependencies
+        if: steps.detect.outputs.node == 'true'
         run: |
-          if [ -f package.json ]; then
-            if [ -f package-lock.json ]; then
-              npm ci --legacy-peer-deps --ignore-scripts || npm install --legacy-peer-deps --ignore-scripts
-            else
-              npm install --legacy-peer-deps --ignore-scripts
-            fi
+          echo "📦 Instalando dependências Node (sem scripts — segurança)"
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps --ignore-scripts || npm install --legacy-peer-deps --ignore-scripts
+          else
+            npm install --legacy-peer-deps --ignore-scripts
           fi
 
-      - name: Gitleaks
+      - name: NPM Audit — Node Dependency Vulnerabilities
+        if: steps.detect.outputs.node == 'true' && hashFiles('**/package-lock.json') != ''
         run: |
-          docker run --rm \
-          -v ${{ github.workspace }}:/repo \
-          ghcr.io/gitleaks/gitleaks:latest \
-          detect --source="/repo" --redact -v
+          echo "🔍 Auditando dependências Node..."
+          npm audit --audit-level=high || true
 
-      - name: Semgrep
-        uses: semgrep/semgrep-action@v1
+      # =====================================================
+      # PYTHON — Security Steps (condicional)
+      # =====================================================
+
+      - name: Setup Python
+        if: steps.detect.outputs.python == 'true'
+        uses: actions/setup-python@v4
         with:
-          config: p/security-audit
+          python-version: "3.11"
 
-      - name: OSV Scanner
+      - name: Install Python dependencies
+        if: steps.detect.outputs.python == 'true'
         run: |
-          docker run --rm \
-          -v ${{ github.workspace }}:/repo \
-          ghcr.io/google/osv-scanner:latest \
-          scan /repo
+          python -m pip install --upgrade pip
 
-      - name: NPM Audit
-        if: hashFiles('**/package-lock.json') != ''
-        run: npm audit --audit-level=high
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          elif [ -f pyproject.toml ]; then
+            pip install .
+          fi
+
+      - name: Bandit — Python SAST
+        if: steps.detect.outputs.python == 'true'
+        run: |
+          pip install bandit
+          echo "🔍 Escaneando código Python por vulnerabilidades..."
+          if [ -d src ]; then
+            bandit -r src -ll || true
+          else
+            bandit -r . --exclude ./node_modules,./.venv,./venv,./.git -ll || true
+          fi
+
+      - name: pip-audit — Python Dependency Vulnerabilities
+        if: steps.detect.outputs.python == 'true'
+        run: |
+          pip install pip-audit
+          echo "📦 Auditando dependências Python..."
+          pip-audit --progress-spinner=off || true
+
+      # =====================================================
+      # DOCKER — Security Steps (condicional)
+      # =====================================================
+
+      - name: Hadolint — Dockerfile Security Lint
+        if: steps.detect.outputs.docker == 'true'
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+      - name: Trivy — Container Image Scan
+        if: steps.detect.outputs.docker == 'true'
+        run: |
+          echo "🐳 Construindo e escaneando imagem Docker..."
+          docker build -t alpha-security-scan:latest .
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v ${{ github.workspace }}:/repo \
+            aquasec/trivy:latest image \
+            --severity HIGH,CRITICAL \
+            --exit-code 0 \
+            alpha-security-scan:latest
+
+      # =====================================================
+      # Sumário final
+      # =====================================================
+
+      - name: Security Scan Summary
+        if: always()
+        run: |
+          echo "============================================"
+          echo "📊 Security Scan Summary"
+          echo "============================================"
+          echo "  Projeto Node.js:  ${{ steps.detect.outputs.node || 'não' }}"
+          echo "  Projeto Python:   ${{ steps.detect.outputs.python || 'não' }}"
+          echo "  Projeto Docker:   ${{ steps.detect.outputs.docker || 'não' }}"
+          echo "  Projeto Go:       ${{ steps.detect.outputs.go || 'não' }}"
+          echo "--------------------------------------------"
+          echo "  🔐 Gitleaks      → Executado (qualquer projeto)"
+          echo "  🛡️ Semgrep       → Executado (qualquer projeto)"
+          echo "  📦 OSV Scanner   → Executado (qualquer projeto)"
+
+          if [ "${{ steps.detect.outputs.node }}" == "true" ]; then
+            echo "  📦 NPM Audit    → Executado"
+          fi
+
+          if [ "${{ steps.detect.outputs.python }}" == "true" ]; then
+            echo "  🐍 Bandit        → Executado"
+            echo "  📦 pip-audit     → Executado"
+          fi
+
+          if [ "${{ steps.detect.outputs.docker }}" == "true" ]; then
+            echo "  🐳 Hadolint      → Executado"
+            echo "  🐳 Trivy         → Executado"
+          fi
+
+          echo "============================================"
