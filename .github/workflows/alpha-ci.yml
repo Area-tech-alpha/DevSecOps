@@ -85,12 +85,20 @@ jobs:
     secrets: inherit
 
   # ----------------------------------------
+  # Job 4 — E2E Tests (apenas Front-end)
+  # ----------------------------------------
+  e2e:
+    name: "🧪 E2E Tests"
+    uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-e2e.yml@main
+    secrets: inherit
+
+  # ----------------------------------------
   # Gate final — status único para o Branch Protection
   # Configure o Ruleset para exigir: "✅ CI Gate"
   # ----------------------------------------
   gate:
     name: "✅ CI Gate"
-    needs: [build, lint, security]
+    needs: [build, lint, security, e2e]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -100,10 +108,12 @@ jobs:
           echo "  Build   → ${{ needs.build.result }}"
           echo "  Lint    → ${{ needs.lint.result }}"
           echo "  Security→ ${{ needs.security.result }}"
+          echo "  E2E     → ${{ needs.e2e.result }}"
 
           if [[ "${{ needs.build.result }}"    == "failure" ||
                 "${{ needs.lint.result }}"     == "failure" ||
-                "${{ needs.security.result }}" == "failure" ]]; then
+                "${{ needs.security.result }}" == "failure" ||
+                "${{ needs.e2e.result }}"      == "failure" ]]; then
             echo "❌ Um ou mais jobs falharam."
             exit 1
           fi

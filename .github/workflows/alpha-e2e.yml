@@ -1,0 +1,166 @@
+name: Alpha E2E
+
+on:
+  workflow_call:
+  pull_request:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout Target Repo
+        uses: actions/checkout@v4
+
+      # --------------------------------
+      # Detect E2E Framework
+      # --------------------------------
+      - name: Detect E2E Framework
+        id: detect
+        run: |
+          echo "🔍 Procurando frameworks E2E..."
+
+          # Procura arquivo de configuração do Playwright
+          if ls playwright.config.* 1> /dev/null 2>&1; then
+            echo "framework=playwright" >> $GITHUB_OUTPUT
+            echo "✅ Playwright detectado"
+          # Procura arquivo de configuração do Cypress
+          elif ls cypress.config.* 1> /dev/null 2>&1; then
+            echo "framework=cypress" >> $GITHUB_OUTPUT
+            echo "✅ Cypress detectado"
+          else
+            echo "framework=none" >> $GITHUB_OUTPUT
+            echo "ℹ️ Nenhum framework E2E (Playwright/Cypress) detectado. Job será pulado."
+          fi
+
+      # --------------------------------
+      # Setup (só roda se tiver E2E)
+      # --------------------------------
+      - name: Setup Node
+        if: steps.detect.outputs.framework != 'none'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache npm
+        if: steps.detect.outputs.framework != 'none'
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-e2e-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-e2e-
+            ${{ runner.os }}-npm-
+
+      - name: Install Dependencies
+        if: steps.detect.outputs.framework != 'none'
+        run: |
+          echo "📦 Instalando dependências do projeto"
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          else
+            npm install --legacy-peer-deps
+          fi
+
+      # --------------------------------
+      # Playwright specific setup
+      # --------------------------------
+      - name: Install Playwright Browsers
+        if: steps.detect.outputs.framework == 'playwright'
+        run: |
+          echo "🌐 Instalando navegadores do Playwright"
+          npx playwright install --with-deps
+
+      # --------------------------------
+      # Optimization: Only run affected
+      # --------------------------------
+      - name: Get Changed Spec Files
+        id: changed-specs
+        if: steps.detect.outputs.framework != 'none' && github.event_name == 'pull_request'
+        run: |
+          # Pega a branch base do PR (ex: main) pra comparar
+          git fetch origin ${{ github.base_ref }} --depth=1
+
+          echo "🔍 Procurando specs modificadas no PR em relação a ${{ github.base_ref }}..."
+
+          if [ "${{ steps.detect.outputs.framework }}" == "playwright" ]; then
+            # Arquivos do playwright geralmente tem .spec.ts ou testes no diretório tests/e2e/
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.spec\.(ts|js)$|tests/.*' || true)
+          elif [ "${{ steps.detect.outputs.framework }}" == "cypress" ]; then
+            # Arquivos do cypress geralmente tem .cy.ts
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '\.cy\.(ts|js)$|cypress/e2e/.*' || true)
+          fi
+
+          if [ -n "$CHANGED" ]; then
+            # Troca quebras de linha por espaço
+            FILES=$(echo "$CHANGED" | tr '\n' ' ')
+            echo "Arquivos afetados: $FILES"
+            
+            # Exporta para ser usado no comando
+            echo "files=$FILES" >> $GITHUB_OUTPUT
+            echo "run_all=false" >> $GITHUB_OUTPUT
+          else
+            echo "Nenhum arquivo de teste modificado diretamente."
+            # Se você alterar um componente, o teste também precisaria rodar. 
+            # O ideal num projeto avançado é um mapeamento de dependências.
+            # Aqui vamos ser conservadores: se não tocou direto no spec, roda TUDO
+            # ou podemos optar por rodar SÓ QUANDO um arquivo source .ts/tsx mudou.
+            # Pra garantir cobertura, se mudou front, mas não a spec, rods os testes full.
+            echo "run_all=true" >> $GITHUB_OUTPUT
+          fi
+
+      # --------------------------------
+      # Execution
+      # --------------------------------
+      - name: Run E2E Tests
+        if: steps.detect.outputs.framework != 'none'
+        env:
+          CI: true
+        run: |
+          # Define alvos de teste se estamos num PR e arquivos foram tocados.
+          TARGET_FILES="${{ steps.changed-specs.outputs.files }}"
+          RUN_ALL="${{ steps.changed-specs.outputs.run_all }}"
+
+          # Se não for pull_request (ex push na main) ou RUN_ALL=true, zera o TARGET.
+          if [ "$RUN_ALL" == "true" ] || [ "${{ github.event_name }}" != "pull_request" ]; then
+             TARGET_FILES=""
+             echo "🚀 Executando suíte COMPLETA de E2E..."
+          else
+             echo "🚀 Executando testes customizados focado em: $TARGET_FILES"
+          fi
+
+          # 1. Custom Script
+          if node -e "process.exit(require('./package.json').scripts?.['test:e2e'] ? 0 : 1)" 2>/dev/null; then
+            if [ -n "$TARGET_FILES" ]; then
+               # Se tiver script custom, o pass through de args depende da ferramenta, geralmente usa --
+               npm run test:e2e -- $TARGET_FILES
+            else
+               npm run test:e2e
+            fi
+
+          # 2. Playwright
+          elif [ "${{ steps.detect.outputs.framework }}" == "playwright" ]; then
+            if [ -n "$TARGET_FILES" ]; then
+              npx playwright test $TARGET_FILES
+            else
+              npx playwright test
+            fi
+
+          # 3. Cypress
+          elif [ "${{ steps.detect.outputs.framework }}" == "cypress" ]; then
+            if [ -n "$TARGET_FILES" ]; then
+              # Cypress exige spec --spec "file1,file2"
+              COMMA_FILES=$(echo "$TARGET_FILES" | sed 's/ /\,/g' | sed 's/,$//')
+              npx cypress run --spec "$COMMA_FILES"
+            else
+              npx cypress run
+            fi
+          fi
