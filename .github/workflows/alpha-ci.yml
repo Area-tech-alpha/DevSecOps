@@ -11,9 +11,9 @@ on:
     branches:
       - main
       - develop
-    # ⚡ OTIMIZAÇÃO 1 — Paths filter
-    # Só roda se mudou algo que importa para o CI.
-    # Commits só de docs/README não gastam minutos.
+    # ⚡ Paths filter SÓ no push — economiza minutos em merges de docs/infra.
+    # NÃO aplicar em pull_request: se o CI não disparar, o required check
+    # nunca aparece e o PR fica bloqueado para sempre.
     paths:
       - "src/**"
       - "app/**"
@@ -28,26 +28,17 @@ on:
       - "pyproject.toml"
       - ".github/workflows/**"
 
+  # Pull request SEM paths filter.
+  # O CI Gate precisa aparecer em TODOS os PRs para o Branch Protection funcionar.
+  # Mesmo que só o README tenha mudado, o check precisa rodar (e passar rapidinho).
   pull_request:
     branches:
       - main
       - develop
-    paths:
-      - "src/**"
-      - "app/**"
-      - "lib/**"
-      - "prisma/**"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig*.json"
-      - "*.config.*"
-      - "Dockerfile"
-      - "requirements.txt"
-      - "pyproject.toml"
-      - ".github/workflows/**"
 
   # Permite acionar manualmente (sem filtro de paths)
   workflow_dispatch:
+
 
 # ⚡ OTIMIZAÇÃO 2 — Concurrency
 # Se um novo push chegar no mesmo branch/PR enquanto o CI ainda roda,
