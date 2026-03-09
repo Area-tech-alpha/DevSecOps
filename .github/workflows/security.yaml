@@ -12,10 +12,6 @@ permissions:
   contents: read
   security-events: write
 
-# ⚡ Cancela runs duplicados do mesmo branch/PR
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   security:

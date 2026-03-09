@@ -10,10 +10,6 @@ on:
 permissions:
   contents: read
 
-# ⚡ Cancela runs duplicados do mesmo branch/PR
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:

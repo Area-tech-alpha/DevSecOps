@@ -1,19 +1,37 @@
 name: Alpha CI
 
 # ============================================================
-# Orquestrador global — dispara os 3 workflows em paralelo.
-# Cada arquivo filho permanece independente e pode ser
-# executado sozinho via workflow_dispatch ou PR direto.
+# REQUIRED WORKFLOW via GitHub Organization Ruleset
+#
+# Este arquivo é referenciado no Ruleset da org como:
+#   Area-tech-alpha/DevSecOps/.github/workflows/alpha-ci.yml@main
+#
+# Quando aplicado como Required Workflow, o GitHub o executa
+# no contexto do repo ALVO (ex: Api_bonapp), fazendo checkout
+# daquele repo. Os reusable workflows DEVEM usar paths absolutos
+# (owner/repo/path@ref) e não paths locais (./.github/workflows/...)
+# pois paths locais resolvem para o repo alvo, não para DevSecOps.
 # ============================================================
 
 on:
+  # ─────────────────────────────────────────────────────────
+  # OBRIGATÓRIO para Required Workflows via Ruleset.
+  # O GitHub injeta o contexto de pull_request ao rodar
+  # este workflow nos repos filhos via Ruleset.
+  # ─────────────────────────────────────────────────────────
+  pull_request:
+
+  # ─────────────────────────────────────────────────────────
+  # Permite ser chamado diretamente por outros workflows
+  # (ex: repos que não usam Ruleset mas querem o CI centralizado)
+  # ─────────────────────────────────────────────────────────
+  workflow_call:
+
+  # Push no próprio DevSecOps (merge de PRs de config)
   push:
     branches:
       - main
       - develop
-    # ⚡ Paths filter SÓ no push — economiza minutos em merges de docs/infra.
-    # NÃO aplicar em pull_request: se o CI não disparar, o required check
-    # nunca aparece e o PR fica bloqueado para sempre.
     paths:
       - "src/**"
       - "app/**"
@@ -28,23 +46,12 @@ on:
       - "pyproject.toml"
       - ".github/workflows/**"
 
-  # Pull request SEM paths filter.
-  # O CI Gate precisa aparecer em TODOS os PRs para o Branch Protection funcionar.
-  # Mesmo que só o README tenha mudado, o check precisa rodar (e passar rapidinho).
-  pull_request:
-    branches:
-      - main
-      - develop
-
-  # Permite acionar manualmente (sem filtro de paths)
+  # Execução manual
   workflow_dispatch:
 
-
-# ⚡ OTIMIZAÇÃO 2 — Concurrency
-# Se um novo push chegar no mesmo branch/PR enquanto o CI ainda roda,
-# cancela o run antigo automaticamente. Economiza 100% das runs obsoletas.
+# ⚡ Cancela runs obsoletos do mesmo PR/branch
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: alpha-ci-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -54,10 +61,11 @@ permissions:
 jobs:
   # ----------------------------------------
   # Job 1 — Build global (Node / Python / Docker)
+  # Path absoluto obrigatório para Required Workflows
   # ----------------------------------------
   build:
     name: "🏗 Build"
-    uses: ./.github/workflows/alpha-build.yml
+    uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-build.yml@main
     secrets: inherit
 
   # ----------------------------------------
@@ -65,7 +73,7 @@ jobs:
   # ----------------------------------------
   lint:
     name: "🔍 Lint"
-    uses: ./.github/workflows/alpha-lint.yml
+    uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-lint.yml@main
     secrets: inherit
 
   # ----------------------------------------
@@ -73,12 +81,12 @@ jobs:
   # ----------------------------------------
   security:
     name: "🔒 Security"
-    uses: ./.github/workflows/security.yaml
+    uses: Area-tech-alpha/DevSecOps/.github/workflows/security.yaml@main
     secrets: inherit
 
   # ----------------------------------------
-  # Gate final — passa só se os 3 passaram
-  # Configure em: Settings → Branches → "✅ CI Gate"
+  # Gate final — status único para o Branch Protection
+  # Configure o Ruleset para exigir: "✅ CI Gate"
   # ----------------------------------------
   gate:
     name: "✅ CI Gate"
