@@ -1,0 +1,112 @@
+name: Alpha CI
+
+# ============================================================
+# Orquestrador global — dispara os 3 workflows em paralelo.
+# Cada arquivo filho permanece independente e pode ser
+# executado sozinho via workflow_dispatch ou PR direto.
+# ============================================================
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    # ⚡ OTIMIZAÇÃO 1 — Paths filter
+    # Só roda se mudou algo que importa para o CI.
+    # Commits só de docs/README não gastam minutos.
+    paths:
+      - "src/**"
+      - "app/**"
+      - "lib/**"
+      - "prisma/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "*.config.*"
+      - "Dockerfile"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".github/workflows/**"
+
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - "src/**"
+      - "app/**"
+      - "lib/**"
+      - "prisma/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "*.config.*"
+      - "Dockerfile"
+      - "requirements.txt"
+      - "pyproject.toml"
+      - ".github/workflows/**"
+
+  # Permite acionar manualmente (sem filtro de paths)
+  workflow_dispatch:
+
+# ⚡ OTIMIZAÇÃO 2 — Concurrency
+# Se um novo push chegar no mesmo branch/PR enquanto o CI ainda roda,
+# cancela o run antigo automaticamente. Economiza 100% das runs obsoletas.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  # ----------------------------------------
+  # Job 1 — Build global (Node / Python / Docker)
+  # ----------------------------------------
+  build:
+    name: "🏗 Build"
+    uses: ./.github/workflows/alpha-build.yml
+    secrets: inherit
+
+  # ----------------------------------------
+  # Job 2 — Lint / Code Quality
+  # ----------------------------------------
+  lint:
+    name: "🔍 Lint"
+    uses: ./.github/workflows/alpha-lint.yml
+    secrets: inherit
+
+  # ----------------------------------------
+  # Job 3 — Security Scan
+  # ----------------------------------------
+  security:
+    name: "🔒 Security"
+    uses: ./.github/workflows/security.yaml
+    secrets: inherit
+
+  # ----------------------------------------
+  # Gate final — passa só se os 3 passaram
+  # Configure em: Settings → Branches → "✅ CI Gate"
+  # ----------------------------------------
+  gate:
+    name: "✅ CI Gate"
+    needs: [build, lint, security]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all jobs
+        run: |
+          echo "📊 Resultados:"
+          echo "  Build   → ${{ needs.build.result }}"
+          echo "  Lint    → ${{ needs.lint.result }}"
+          echo "  Security→ ${{ needs.security.result }}"
+
+          if [[ "${{ needs.build.result }}"    == "failure" ||
+                "${{ needs.lint.result }}"     == "failure" ||
+                "${{ needs.security.result }}" == "failure" ]]; then
+            echo "❌ Um ou mais jobs falharam."
+            exit 1
+          fi
+
+          echo "✅ Todos os checks passaram."

@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# ⚡ Cancela runs duplicados do mesmo branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Universal Build
@@ -23,6 +28,16 @@ jobs:
       # --------------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      # ⚡ OTIMIZAÇÃO — Cache do npm
+      # Reutiliza ~/.npm entre runs. Economiza 60-80% do tempo de install.
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
 
       # --------------------------------
       # Detect project type
