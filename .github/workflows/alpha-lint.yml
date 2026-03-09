@@ -2,14 +2,13 @@ name: Alpha Lint
 
 on:
   workflow_call:
-
   pull_request:
     branches:
       - main
+      - develop
 
 permissions:
   contents: read
-
 
 jobs:
   lint:
@@ -17,11 +16,15 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      # Checkout do repositório que está sendo validado
+      # --------------------------------
+      # Checkout global
+      # --------------------------------
       - name: Checkout Target Repo
         uses: actions/checkout@v4
 
-      # ⚡ Cache npm — reutiliza entre runs
+      # --------------------------------
+      # Setup de Cache universal
+      # --------------------------------
       - name: Cache npm
         uses: actions/cache@v4
         with:
@@ -31,8 +34,30 @@ jobs:
             ${{ runner.os }}-npm-lint-
             ${{ runner.os }}-npm-
 
-      # Checkout do repositório central DevSecOps
-      - name: Checkout DevSecOps Config
+      # --------------------------------
+      # Detect project type
+      # --------------------------------
+      - name: Detect project type
+        id: detect
+        run: |
+          if [ -f package.json ]; then
+            echo "node=true" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -f requirements.txt ] || [ -f pyproject.toml ]; then
+            echo "python=true" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -f Dockerfile ]; then
+            echo "docker=true" >> $GITHUB_OUTPUT
+          fi
+
+      # =====================================================
+      # NODE / TYPESCRIPT LINTING
+      # =====================================================
+
+      - name: Checkout DevSecOps Config (Node)
+        if: steps.detect.outputs.node == 'true'
         uses: actions/checkout@v4
         with:
           repository: Area-tech-alpha/DevSecOps
@@ -40,41 +65,68 @@ jobs:
           path: devsecops
           fetch-depth: 1
 
-      # Setup Node
       - name: Setup Node
+        if: steps.detect.outputs.node == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # Instala dependências do projeto (necessário para resolver tipos, etc.)
-      # --legacy-peer-deps resolve conflitos como @nestjs/axios >=4 vs @nestjs/terminus <=10
-      - name: Install Project Dependencies
+      - name: Install Project Dependencies (Node)
+        if: steps.detect.outputs.node == 'true'
         run: |
-          if [ -f package.json ]; then
-            echo "📦 Installing project dependencies (legacy-peer-deps)"
-            if [ -f package-lock.json ]; then
-              npm ci --legacy-peer-deps || npm install --legacy-peer-deps
-            else
-              npm install --legacy-peer-deps
-            fi
+          echo "📦 Installing project dependencies (legacy-peer-deps)"
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps || npm install --legacy-peer-deps
           else
-            echo "ℹ️ No package.json found, skipping project deps"
+            npm install --legacy-peer-deps
           fi
 
-      # Instala ESLint e Prettier isolados (sem interferir nas deps do projeto)
-      - name: Install Lint Tools
+      - name: Install Lint Tools (Node)
+        if: steps.detect.outputs.node == 'true'
         run: |
           npm install --no-save --legacy-peer-deps \
             eslint \
             @eslint/js \
             typescript \
-            typescript-eslint \
- 
+            typescript-eslint
 
-      # Executa ESLint usando configuração central
-      - name: Run ESLint
+      - name: Run ESLint (Node)
+        if: steps.detect.outputs.node == 'true'
         run: |
           npx eslint . \
             --config devsecops/lint/eslint.config.mjs \
             --ext .js,.ts,.tsx \
             --no-error-on-unmatched-pattern
+
+      # =====================================================
+      # PYTHON LINTING
+      # =====================================================
+
+      - name: Setup Python
+        if: steps.detect.outputs.python == 'true'
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install Python Linters
+        if: steps.detect.outputs.python == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+
+      - name: Run Ruff (Python Linter)
+        if: steps.detect.outputs.python == 'true'
+        run: |
+          echo "🔎 Running Ruff (Linting + Format check)"
+          ruff check .
+
+      # =====================================================
+      # DOCKER LINTING
+      # =====================================================
+
+      - name: Run Hadolint (Docker Linter)
+        if: steps.detect.outputs.docker == 'true'
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          ignore: DL3008,DL3013 # Ignora pinned versions aviso caso chato
