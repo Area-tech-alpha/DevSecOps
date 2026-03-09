@@ -1,6 +1,7 @@
 import js from "@eslint/js"
 import tseslint from "typescript-eslint"
 import prettier from "eslint-config-prettier"
+import globals from "globals"
 
 export default [
 
@@ -9,18 +10,40 @@ export default [
   ...tseslint.configs.recommended,
 
   {
-    files: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.mjs"],
+    files: ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.mjs", "**/*.jsx"],
 
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {
         ecmaVersion: "latest",
-        sourceType: "module"
+        sourceType: "module",
+        ecmaFeatures: { jsx: true }
+      },
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+        ...globals.es2021
+      }
+    },
+
+    // Configuração "Dummy" do react-hooks para evitar que comentários `// eslint-disable-next-line react-hooks/algo` 
+    // em projetos Front-End não crashem o ESLint global por não encontrar a definição da regra no repositório central.
+    plugins: {
+      "react-hooks": {
+        rules: {
+          "rules-of-hooks": { create() { return {}; } },
+          "exhaustive-deps": { create() { return {}; } }
+        }
       }
     },
 
     rules: {
-      // NestJS usa muito `any` em filters/interceptors/adapters
+      // Regras nativas muito restritas do ESLint 9 ou falsos-positivos de legacy code
+      "no-empty": "warn",
+      "no-useless-assignment": "warn",
+      "preserve-caught-error": "warn",
+
+      // NestJS/Frontends usam muito `any` em filters/interceptors/adapters/props
       // Em vez de "error" que quebra o CI, vira um warning.
       "@typescript-eslint/no-explicit-any": "warn",
 

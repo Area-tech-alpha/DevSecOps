@@ -89,7 +89,8 @@ jobs:
             @eslint/js \
             typescript \
             typescript-eslint \
-            eslint-config-prettier
+            eslint-config-prettier \
+            globals
 
       - name: Run ESLint (Node)
         if: steps.detect.outputs.node == 'true'
