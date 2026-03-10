@@ -41,7 +41,13 @@ export default [
       // Regras nativas muito restritas do ESLint 9 ou falsos-positivos de legacy code
       "no-empty": "warn",
       "no-useless-assignment": "warn",
-      "preserve-caught-error": "warn",
+      "no-console": "warn",
+      "no-shadow": "warn",
+
+      // Segurança (Black Hat Mindset)
+      "no-eval": "error",
+      "no-implied-eval": "error",
+      "no-new-func": "error",
 
       // NestJS/Frontends usam muito `any` em filters/interceptors/adapters/props
       // Em vez de "error" que quebra o CI, vira um warning.
