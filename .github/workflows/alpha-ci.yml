@@ -57,6 +57,7 @@ concurrency:
 permissions:
   contents: read
   security-events: write
+  pull-requests: read
 
 jobs:
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -155,33 +156,55 @@ jobs:
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   gate:
     name: "✅ CI Gate"
-    needs: [build, lint, test, security, e2e]
+    needs: [changes, build, lint, test, security, e2e]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Check all jobs
+      - name: Generate Summary
         run: |
-          echo "📊 Pipeline Fail-Fast — Resultados:"
-          echo ""
-          echo "  Stage 1:"
-          echo "    🏗 Build    → ${{ needs.build.result }}"
-          echo ""
-          echo "  Stage 2:"
-          echo "    🔍 Lint     → ${{ needs.lint.result }}"
-          echo "    🧪 Test     → ${{ needs.test.result }}"
-          echo "    🔒 Security → ${{ needs.security.result }}"
-          echo ""
-          echo "  Stage 3:"
-          echo "    🧪 E2E      → ${{ needs.e2e.result }}"
-          echo ""
+          echo "### 🛡️ Alpha DevSecOps — Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          
+          # Stage 0: Changes
+          if [ "${{ needs.changes.result }}" == "skipped" ]; then
+            echo "| 🔀 Detect Changes | ⏩ SKIPPED (Manual/Dispatch) |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.changes.outputs.code }}" == "true" ]; then
+            echo "| 🔀 Detect Changes | ✅ CODE CHANGED |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 🔀 Detect Changes | ℹ️ NO CODE CHANGES |" >> $GITHUB_STEP_SUMMARY
+          fi
 
+          # Stage 1: Build
+          if [ "${{ needs.build.result }}" == "success" ]; then
+            echo "| 🏗 Build | ✅ SUCCESS |" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.build.result }}" == "skipped" ]; then
+            echo "| 🏗 Build | ⏩ SKIPPED |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| 🏗 Build | ❌ FAILED |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 2: Quality & Security
+          echo "| 🔍 Lint | ${{ needs.lint.result == 'success' && '✅ SUCCESS' || (needs.lint.result == 'skipped' && '⏩ SKIPPED' || '❌ FAILED') }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧪 Unit Tests | ${{ needs.test.result == 'success' && '✅ SUCCESS' || (needs.test.result == 'skipped' && '⏩ SKIPPED' || '❌ FAILED') }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔒 Security | ${{ needs.security.result == 'success' && '✅ SUCCESS' || (needs.security.result == 'skipped' && '⏩ SKIPPED' || '❌ FAILED') }} |" >> $GITHUB_STEP_SUMMARY
+          
+          # Stage 3: E2E
+          echo "| 🧪 E2E Tests | ${{ needs.e2e.result == 'success' && '✅ SUCCESS' || (needs.e2e.result == 'skipped' && '⏩ SKIPPED' || '❌ FAILED') }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Check final status
           if [[ "${{ needs.build.result }}"    == "failure" ||
                 "${{ needs.lint.result }}"     == "failure" ||
                 "${{ needs.test.result }}"     == "failure" ||
                 "${{ needs.security.result }}" == "failure" ||
                 "${{ needs.e2e.result }}"      == "failure" ]]; then
-            echo "❌ Um ou mais jobs falharam."
+            echo "> [!CAUTION]" >> $GITHUB_STEP_SUMMARY
+            echo "> Pipeline interrompida devido a falhas críticas. Verifique os logs acima." >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
 
-          echo "✅ Todos os checks passaram."
+          echo "> [!TIP]" >> $GITHUB_STEP_SUMMARY
+          echo "> Todos os checks de segurança e qualidade passaram com sucesso. Prontos para o merge." >> $GITHUB_STEP_SUMMARY
+
