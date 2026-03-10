@@ -159,6 +159,7 @@ jobs:
         env:
           CI: true
           NODE_ENV: test
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_dummy"
 
       # =====================================================
       # PYTHON — Unit Tests

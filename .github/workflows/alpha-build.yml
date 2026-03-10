@@ -128,6 +128,8 @@ jobs:
           else
             echo "ℹ️ No build script found"
           fi
+        env:
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_dummy"
 
       # =====================================================
       # TYPESCRIPT
@@ -138,6 +140,8 @@ jobs:
         run: |
           echo "🔎 Running TypeScript type check"
           npx tsc --noEmit || true
+        env:
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_dummy"
 
       # =====================================================
       # PYTHON PROJECTS

@@ -112,6 +112,8 @@ jobs:
             --config devsecops/lint/eslint.config.mjs \
             --ext .js,.ts,.tsx \
             --no-error-on-unmatched-pattern
+        env:
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_dummy"
 
       # =====================================================
       # PYTHON LINTING
