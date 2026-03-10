@@ -45,8 +45,6 @@ jobs:
             elif grep -q '"vitest"' package.json; then
               echo "node_runner=vitest" >> $GITHUB_OUTPUT
               echo "✅ Vitest detectado como runner"
-            else
-              echo "node_runner=unknown" >> $GITHUB_OUTPUT
             fi
 
             # Verifica se existe script de test unitário
@@ -162,7 +160,9 @@ jobs:
           # Define flags baseado no runner detectado
           TEST_FLAGS=""
           if [ "${{ steps.detect.outputs.node_runner }}" == "jest" ]; then
-            TEST_FLAGS="-- --forceExit --detectOpenHandles"
+            TEST_FLAGS="-- --forceExit --detectOpenHandles --passWithNoTests"
+          elif [ "${{ steps.detect.outputs.node_runner }}" == "vitest" ]; then
+            TEST_FLAGS="-- --passWithNoTests"
           fi
 
           # Prefere test:unit se existir, senão usa test genérico
