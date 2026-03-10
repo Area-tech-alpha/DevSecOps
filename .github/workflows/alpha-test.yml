@@ -38,6 +38,17 @@ jobs:
           if [ -f package.json ]; then
             echo "node=true" >> $GITHUB_OUTPUT
 
+            # Detecta o runner (jest vs vitest)
+            if grep -q '"jest"' package.json; then
+              echo "node_runner=jest" >> $GITHUB_OUTPUT
+              echo "✅ Jest detectado como runner"
+            elif grep -q '"vitest"' package.json; then
+              echo "node_runner=vitest" >> $GITHUB_OUTPUT
+              echo "✅ Vitest detectado como runner"
+            else
+              echo "node_runner=unknown" >> $GITHUB_OUTPUT
+            fi
+
             # Verifica se existe script de test unitário
             if node -e "
               const pkg = require('./package.json');
@@ -148,14 +159,19 @@ jobs:
       - name: Run Node Unit Tests
         if: steps.detect.outputs.node_test == 'true'
         run: |
+          # Define flags baseado no runner detectado
+          TEST_FLAGS=""
+          if [ "${{ steps.detect.outputs.node_runner }}" == "jest" ]; then
+            TEST_FLAGS="-- --forceExit --detectOpenHandles"
+          fi
+
           # Prefere test:unit se existir, senão usa test genérico
-          # Adicionamos --forceExit para evitar que o processo enganche no CI
           if node -e "process.exit(require('./package.json').scripts?.['test:unit'] ? 0 : 1)" 2>/dev/null; then
-            echo "🧪 Executando: npm run test:unit -- --forceExit --detectOpenHandles"
-            npm run test:unit -- --forceExit --detectOpenHandles
+            echo "🧪 Executando: npm run test:unit $TEST_FLAGS"
+            npm run test:unit $TEST_FLAGS
           else
-            echo "🧪 Executando: npm test -- --forceExit --detectOpenHandles"
-            npm test -- --forceExit --detectOpenHandles
+            echo "🧪 Executando: npm test $TEST_FLAGS"
+            npm test $TEST_FLAGS
           fi
         env:
           CI: true
