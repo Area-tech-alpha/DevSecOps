@@ -187,7 +187,7 @@ jobs:
         if: steps.detect.outputs.python_test == 'true'
         run: |
           echo "🧪 Executando testes Python com pytest"
-          pytest -q --tb=short --co -q 2>/dev/null && pytest -q --tb=short || true
+          pytest -q --tb=short --co -q 2>/dev/null && pytest -q --tb=short
         env:
           CI: true
 

@@ -139,7 +139,7 @@ jobs:
         if: steps.detect.outputs.typescript == 'true'
         run: |
           echo "🔎 Running TypeScript type check"
-          npx tsc --noEmit || true
+          npx tsc --noEmit
         env:
           DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_dummy"
 
@@ -170,21 +170,21 @@ jobs:
       - name: Python Lint
         if: steps.detect.outputs.python == 'true'
         run: |
-          ruff check . || true
+          ruff check .
 
       - name: Python Security Scan
         if: steps.detect.outputs.python == 'true'
         run: |
           if [ -d src ]; then
-            bandit -r src -ll || true
+            bandit -r src -ll
           else
-            bandit -r . -ll || true
+            bandit -r . -ll
           fi
 
       - name: Python Dependency Audit
         if: steps.detect.outputs.python == 'true'
         run: |
-          pip-audit --progress-spinner=off || true
+          pip-audit --progress-spinner=off
 
       - name: Python Tests
         if: steps.detect.outputs.python == 'true'
