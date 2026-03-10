@@ -44,7 +44,7 @@ export default [
       "no-console": "warn",
       "no-shadow": "warn",
 
-      // Segurança (Black Hat Mindset)
+      // Segurança
       "no-eval": "error",
       "no-implied-eval": "error",
       "no-new-func": "error",
