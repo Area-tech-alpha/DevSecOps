@@ -43,6 +43,7 @@ export default [
       "no-useless-assignment": "warn",
       "no-console": "warn",
       "no-shadow": "warn",
+      "preserve-caught-error": "warn",
 
       // Segurança
       "no-eval": "error",
