@@ -63,6 +63,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node-modules-
 
+      - name: Create .npmrc for Auth
+        if: steps.detect.outputs.framework != 'none' && steps.cache-nm.outputs.cache-hit != 'true'
+        run: |
+          echo "@area-tech-alpha:registry=https://npm.pkg.github.com/" > .npmrc
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> .npmrc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install Dependencies
         if: steps.detect.outputs.framework != 'none' && steps.cache-nm.outputs.cache-hit != 'true'
         run: |
