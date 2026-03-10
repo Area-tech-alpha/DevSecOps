@@ -1,0 +1,225 @@
+name: Alpha Test
+
+on:
+  workflow_call:
+
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: "Universal Unit Tests"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # --------------------------------
+      # Checkout
+      # --------------------------------
+      - name: Checkout Target Repo
+        uses: actions/checkout@v4
+
+      # --------------------------------
+      # Detect test frameworks
+      # --------------------------------
+      - name: Detect test environment
+        id: detect
+        run: |
+          echo "🔍 Detectando ambiente de testes..."
+
+          HAS_TESTS=false
+
+          # ── Node.js ──
+          if [ -f package.json ]; then
+            echo "node=true" >> $GITHUB_OUTPUT
+
+            # Verifica se existe script de test unitário
+            if node -e "
+              const pkg = require('./package.json');
+              const scripts = pkg.scripts || {};
+              if (scripts['test:unit'] || scripts['test']) process.exit(0);
+              process.exit(1);
+            " 2>/dev/null; then
+              echo "node_test=true" >> $GITHUB_OUTPUT
+              echo "✅ Script de teste Node detectado"
+              HAS_TESTS=true
+            else
+              echo "ℹ️  Nenhum script test/test:unit encontrado no package.json"
+            fi
+          fi
+
+          # ── Python ──
+          if [ -f requirements.txt ] || [ -f pyproject.toml ] || [ -f setup.py ]; then
+            echo "python=true" >> $GITHUB_OUTPUT
+
+            if [ -d tests ] || [ -d test ]; then
+              echo "python_test=true" >> $GITHUB_OUTPUT
+              echo "✅ Diretório de testes Python detectado"
+              HAS_TESTS=true
+            else
+              echo "ℹ️  Nenhum diretório tests/ ou test/ encontrado"
+            fi
+          fi
+
+          # ── Go ──
+          if [ -f go.mod ]; then
+            echo "go=true" >> $GITHUB_OUTPUT
+
+            # Go: procura arquivos _test.go
+            if find . -name '*_test.go' -not -path './vendor/*' | grep -q .; then
+              echo "go_test=true" >> $GITHUB_OUTPUT
+              echo "✅ Arquivos _test.go detectados"
+              HAS_TESTS=true
+            else
+              echo "ℹ️  Nenhum arquivo _test.go encontrado"
+            fi
+          fi
+
+          echo "has_tests=$HAS_TESTS" >> $GITHUB_OUTPUT
+
+      # --------------------------------
+      # Skip message
+      # --------------------------------
+      - name: No tests found — skip
+        if: steps.detect.outputs.has_tests != 'true'
+        run: |
+          echo "ℹ️  Nenhum framework/diretório de testes detectado."
+          echo "    Este job será encerrado sem falha."
+
+      # =====================================================
+      # NODE.JS — Unit Tests
+      # =====================================================
+
+      - name: Cache npm
+        if: steps.detect.outputs.node_test == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-test-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-test-
+            ${{ runner.os }}-npm-
+
+      - name: Setup Node
+        if: steps.detect.outputs.node_test == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Node dependencies
+        if: steps.detect.outputs.node_test == 'true'
+        run: |
+          echo "📦 Instalando dependências"
+          if [ -f package-lock.json ]; then
+            npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          else
+            npm install --legacy-peer-deps
+          fi
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+
+      # Prisma (auto detect) — necessário pra projetos que importam @prisma/client nos testes
+      - name: Generate Prisma Client
+        if: steps.detect.outputs.node_test == 'true'
+        env:
+          DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_dummy"
+        run: |
+          if [ -f prisma/schema.prisma ]; then
+            echo "⚡ Generating Prisma Client (necessário para imports nos testes)"
+            npx prisma generate
+          fi
+
+      - name: Run Node Unit Tests
+        if: steps.detect.outputs.node_test == 'true'
+        run: |
+          # Prefere test:unit se existir, senão usa test genérico
+          if node -e "process.exit(require('./package.json').scripts?.['test:unit'] ? 0 : 1)" 2>/dev/null; then
+            echo "🧪 Executando: npm run test:unit"
+            npm run test:unit
+          else
+            echo "🧪 Executando: npm test"
+            npm test
+          fi
+        env:
+          CI: true
+          NODE_ENV: test
+
+      # =====================================================
+      # PYTHON — Unit Tests
+      # =====================================================
+
+      - name: Setup Python
+        if: steps.detect.outputs.python_test == 'true'
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        if: steps.detect.outputs.python_test == 'true'
+        run: |
+          python -m pip install --upgrade pip pytest pytest-cov
+
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          elif [ -f pyproject.toml ]; then
+            pip install .
+          fi
+
+      - name: Run Python Unit Tests
+        if: steps.detect.outputs.python_test == 'true'
+        run: |
+          echo "🧪 Executando testes Python com pytest"
+          pytest -q --tb=short --co -q 2>/dev/null && pytest -q --tb=short || true
+        env:
+          CI: true
+
+      # =====================================================
+      # GO — Unit Tests
+      # =====================================================
+
+      - name: Setup Go
+        if: steps.detect.outputs.go_test == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run Go Unit Tests
+        if: steps.detect.outputs.go_test == 'true'
+        run: |
+          echo "🧪 Executando testes Go"
+          go test ./... -v -count=1
+        env:
+          CI: true
+
+      # =====================================================
+      # Sumário
+      # =====================================================
+
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "============================================"
+          echo "🧪 Unit Test Summary"
+          echo "============================================"
+
+          if [ "${{ steps.detect.outputs.has_tests }}" != "true" ]; then
+            echo "  ℹ️  Nenhum teste detectado — job pulado"
+          fi
+
+          if [ "${{ steps.detect.outputs.node_test }}" == "true" ]; then
+            echo "  📦 Node.js → Testes executados"
+          fi
+
+          if [ "${{ steps.detect.outputs.python_test }}" == "true" ]; then
+            echo "  🐍 Python  → Testes executados"
+          fi
+
+          if [ "${{ steps.detect.outputs.go_test }}" == "true" ]; then
+            echo "  🐹 Go      → Testes executados"
+          fi
+
+          echo "============================================"

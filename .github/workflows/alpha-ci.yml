@@ -77,7 +77,15 @@ jobs:
     secrets: inherit
 
   # ----------------------------------------
-  # Job 3 — Security Scan
+  # Job 3 — Unit Tests
+  # ----------------------------------------
+  test:
+    name: "🧪 Unit Tests"
+    uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-test.yml@main
+    secrets: inherit
+
+  # ----------------------------------------
+  # Job 4 — Security Scan
   # ----------------------------------------
   security:
     name: "🔒 Security"
@@ -85,7 +93,7 @@ jobs:
     secrets: inherit
 
   # ----------------------------------------
-  # Job 4 — E2E Tests (apenas Front-end)
+  # Job 5 — E2E Tests (apenas Front-end)
   # ----------------------------------------
   e2e:
     name: "🧪 E2E Tests"
@@ -98,7 +106,7 @@ jobs:
   # ----------------------------------------
   gate:
     name: "✅ CI Gate"
-    needs: [build, lint, security, e2e]
+    needs: [build, lint, test, security, e2e]
     runs-on: ubuntu-latest
     if: always()
     steps:
@@ -107,11 +115,13 @@ jobs:
           echo "📊 Resultados:"
           echo "  Build   → ${{ needs.build.result }}"
           echo "  Lint    → ${{ needs.lint.result }}"
+          echo "  Test    → ${{ needs.test.result }}"
           echo "  Security→ ${{ needs.security.result }}"
           echo "  E2E     → ${{ needs.e2e.result }}"
 
           if [[ "${{ needs.build.result }}"    == "failure" ||
                 "${{ needs.lint.result }}"     == "failure" ||
+                "${{ needs.test.result }}"     == "failure" ||
                 "${{ needs.security.result }}" == "failure" ||
                 "${{ needs.e2e.result }}"      == "failure" ]]; then
             echo "❌ Um ou mais jobs falharam."
