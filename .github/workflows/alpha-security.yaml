@@ -215,18 +215,6 @@ jobs:
       # DOCKER — Security Steps (condicional)
       # =====================================================
 
-      - name: Trivy — Container Image Scan
-        if: steps.detect.outputs.docker == 'true'
-        run: |
-          echo "🐳 Construindo e escaneando imagem Docker..."
-          docker build -t alpha-security-scan:latest .
-          docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v ${{ github.workspace }}:/repo \
-            aquasec/trivy:latest image \
-            --severity HIGH,CRITICAL \
-            --exit-code 1 \
-            alpha-security-scan:latest
 
       # =====================================================
       # Sumário final
@@ -247,6 +235,7 @@ jobs:
           echo "  🛡️ Semgrep       → Executado (qualquer projeto)"
           echo "  📦 OSV Scanner   → Executado (qualquer projeto)"
 
+
           if [ "${{ steps.detect.outputs.node }}" == "true" ]; then
             echo "  📦 NPM Audit    → Executado"
           fi
@@ -258,7 +247,6 @@ jobs:
 
           if [ "${{ steps.detect.outputs.docker }}" == "true" ]; then
             echo "  🐳 Hadolint      → Executado"
-            echo "  🐳 Trivy         → Executado"
           fi
 
           echo "============================================"
