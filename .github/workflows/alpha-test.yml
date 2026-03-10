@@ -149,12 +149,13 @@ jobs:
         if: steps.detect.outputs.node_test == 'true'
         run: |
           # Prefere test:unit se existir, senão usa test genérico
+          # Adicionamos --forceExit para evitar que o processo enganche no CI
           if node -e "process.exit(require('./package.json').scripts?.['test:unit'] ? 0 : 1)" 2>/dev/null; then
-            echo "🧪 Executando: npm run test:unit"
-            npm run test:unit
+            echo "🧪 Executando: npm run test:unit -- --forceExit --detectOpenHandles"
+            npm run test:unit -- --forceExit --detectOpenHandles
           else
-            echo "🧪 Executando: npm test"
-            npm test
+            echo "🧪 Executando: npm test -- --forceExit --detectOpenHandles"
+            npm test -- --forceExit --detectOpenHandles
           fi
         env:
           CI: true
