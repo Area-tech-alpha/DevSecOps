@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   security:
-    name: "🔒 Security"
+    name: "Universal Security"
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
