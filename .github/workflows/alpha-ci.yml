@@ -60,11 +60,58 @@ permissions:
 
 jobs:
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # PATH FILTER — Detecta o que mudou
+  # Se só mudaram docs/README, pula TUDO.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  changes:
+    name: "🔀 Detect Changes"
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'app/**'
+              - 'lib/**'
+              - 'pages/**'
+              - 'components/**'
+              - 'prisma/**'
+              - '**/*.ts'
+              - '**/*.tsx'
+              - '**/*.js'
+              - '**/*.jsx'
+              - '**/*.py'
+              - '**/*.go'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'requirements.txt'
+              - 'pyproject.toml'
+              - 'go.mod'
+              - 'go.sum'
+              - 'Dockerfile'
+              - 'docker-compose*.yml'
+              - 'tsconfig*.json'
+              - '*.config.*'
+              - '.github/**'
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # STAGE 1 — Build (gate de entrada)
   # Se falhar, NADA mais roda. Economia máxima.
+  # Pula se só mudaram docs (needs.changes.outputs.code == false)
+  # workflow_dispatch sempre roda (changes é skipped → if always())
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   build:
     name: "🏗 Build"
+    needs: [changes]
+    if: |
+      always() &&
+      (needs.changes.result == 'skipped' || needs.changes.outputs.code == 'true')
     uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-build.yml@main
     secrets: inherit
 

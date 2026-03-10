@@ -25,15 +25,16 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ⚡ OTIMIZAÇÃO — Cache do npm
-      # Reutiliza ~/.npm entre runs. Economiza 60-80% do tempo de install.
-      - name: Cache npm
+      # ⚡ OTIMIZAÇÃO — Cache de node_modules
+      # Cacheia node_modules diretamente. Se cache hit → pula npm ci.
+      - name: Cache node_modules
+        id: cache-nm
         uses: actions/cache@v4
         with:
-          path: ~/.npm
-          key: ${{ runner.os }}-npm-${{ hashFiles('**/package-lock.json') }}
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-npm-
+            ${{ runner.os }}-node-modules-
 
       # --------------------------------
       # Detect project type
@@ -74,9 +75,9 @@ jobs:
           node -e "JSON.parse(require('fs').readFileSync('package.json'))"
 
       - name: Install Node dependencies
-        if: steps.detect.outputs.node == 'true'
+        if: steps.detect.outputs.node == 'true' && steps.cache-nm.outputs.cache-hit != 'true'
         run: |
-          echo "📦 Installing dependencies"
+          echo "📦 Installing dependencies (cache miss)"
 
           if [ -f package-lock.json ]; then
             npm ci --legacy-peer-deps || npm install --legacy-peer-deps
@@ -84,7 +85,6 @@ jobs:
             npm install --legacy-peer-deps
           fi
         env:
-          # Necessário para projetos que usam @nestjs/axios >= 4 com terminus <= 10
           NODE_OPTIONS: "--max-old-space-size=4096"
 
       # --------------------------------
