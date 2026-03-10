@@ -81,7 +81,7 @@ jobs:
   # ----------------------------------------
   security:
     name: "🔒 Security"
-    uses: Area-tech-alpha/DevSecOps/.github/workflows/security.yaml@main
+    uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-security.yaml@main
     secrets: inherit
 
   # ----------------------------------------
