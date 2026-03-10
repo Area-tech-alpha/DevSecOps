@@ -97,8 +97,12 @@ jobs:
       - name: Install Lint Tools (Node)
         if: steps.detect.outputs.node == 'true'
         run: |
+          # Isola as ferramentas do DevSecOps das dependências do projeto alvo
+          # Isso evita conflitos de versão do AJV ou ESLint Legacy
+          cd devsecops/lint
+          npm init -y
           npm install --no-save --legacy-peer-deps \
-            eslint \
+            eslint@9 \
             @eslint/js \
             typescript \
             typescript-eslint \
@@ -108,11 +112,14 @@ jobs:
       - name: Run ESLint (Node)
         if: steps.detect.outputs.node == 'true'
         run: |
-          npx eslint . \
+          # Força o uso do Flat Config e usa o binário isolado
+          export ESLINT_USE_FLAT_CONFIG=true
+          ./devsecops/lint/node_modules/.bin/eslint . \
             --config devsecops/lint/eslint.config.mjs \
             --no-error-on-unmatched-pattern
         env:
           DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_dummy"
+          ESLINT_USE_FLAT_CONFIG: "true"
 
       # =====================================================
       # PYTHON LINTING
