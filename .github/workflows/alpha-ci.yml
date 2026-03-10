@@ -59,51 +59,53 @@ permissions:
   security-events: write
 
 jobs:
-  # ----------------------------------------
-  # Job 1 — Build global (Node / Python / Docker)
-  # Path absoluto obrigatório para Required Workflows
-  # ----------------------------------------
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # STAGE 1 — Build (gate de entrada)
+  # Se falhar, NADA mais roda. Economia máxima.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   build:
     name: "🏗 Build"
     uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-build.yml@main
     secrets: inherit
 
-  # ----------------------------------------
-  # Job 2 — Lint / Code Quality
-  # ----------------------------------------
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # STAGE 2 — Lint + Test + Security (paralelo)
+  # Só rodam se o Build passou. Os 3 rodam ao
+  # mesmo tempo, pois não dependem entre si.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   lint:
     name: "🔍 Lint"
+    needs: [build]
     uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-lint.yml@main
     secrets: inherit
 
-  # ----------------------------------------
-  # Job 3 — Unit Tests
-  # ----------------------------------------
   test:
     name: "🧪 Unit Tests"
+    needs: [build]
     uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-test.yml@main
     secrets: inherit
 
-  # ----------------------------------------
-  # Job 4 — Security Scan
-  # ----------------------------------------
   security:
     name: "🔒 Security"
+    needs: [build]
     uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-security.yaml@main
     secrets: inherit
 
-  # ----------------------------------------
-  # Job 5 — E2E Tests (apenas Front-end)
-  # ----------------------------------------
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # STAGE 3 — E2E (job mais caro)
+  # Só roda depois que Lint, Test e Security
+  # passaram. Evita gastar ~8 min à toa.
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   e2e:
     name: "🧪 E2E Tests"
+    needs: [lint, test, security]
     uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-e2e.yml@main
     secrets: inherit
 
-  # ----------------------------------------
-  # Gate final — status único para o Branch Protection
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # GATE — Status único para Branch Protection
   # Configure o Ruleset para exigir: "✅ CI Gate"
-  # ----------------------------------------
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   gate:
     name: "✅ CI Gate"
     needs: [build, lint, test, security, e2e]
@@ -112,12 +114,19 @@ jobs:
     steps:
       - name: Check all jobs
         run: |
-          echo "📊 Resultados:"
-          echo "  Build   → ${{ needs.build.result }}"
-          echo "  Lint    → ${{ needs.lint.result }}"
-          echo "  Test    → ${{ needs.test.result }}"
-          echo "  Security→ ${{ needs.security.result }}"
-          echo "  E2E     → ${{ needs.e2e.result }}"
+          echo "📊 Pipeline Fail-Fast — Resultados:"
+          echo ""
+          echo "  Stage 1:"
+          echo "    🏗 Build    → ${{ needs.build.result }}"
+          echo ""
+          echo "  Stage 2:"
+          echo "    🔍 Lint     → ${{ needs.lint.result }}"
+          echo "    🧪 Test     → ${{ needs.test.result }}"
+          echo "    🔒 Security → ${{ needs.security.result }}"
+          echo ""
+          echo "  Stage 3:"
+          echo "    🧪 E2E      → ${{ needs.e2e.result }}"
+          echo ""
 
           if [[ "${{ needs.build.result }}"    == "failure" ||
                 "${{ needs.lint.result }}"     == "failure" ||
