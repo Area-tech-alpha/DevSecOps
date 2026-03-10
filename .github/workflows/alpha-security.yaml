@@ -78,13 +78,21 @@ jobs:
       # UNIVERSAL — Secrets Leak Detection (qualquer projeto)
       # =====================================================
 
+      - name: Checkout DevSecOps Config (Security)
+        uses: actions/checkout@v4
+        with:
+          repository: Area-tech-alpha/DevSecOps
+          ref: main
+          path: devsecops
+          fetch-depth: 1
+
       - name: Gitleaks — Secrets Detection
         run: |
           echo "🔐 Escaneando repositório inteiro por secrets vazados..."
           docker run --rm \
             -v ${{ github.workspace }}:/repo \
             ghcr.io/gitleaks/gitleaks:latest \
-            detect --source="/repo" --redact -v
+            detect --source="/repo" --config="/repo/devsecops/security/gitleaks.toml" --redact -v
 
       # =====================================================
       # UNIVERSAL — SAST (qualquer linguagem)

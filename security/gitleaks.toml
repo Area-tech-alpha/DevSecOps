@@ -1,0 +1,20 @@
+# Gitleaks Configuration — Area Tech Alpha
+# ----------------------------------------
+# Este arquivo centraliza as regras e exceções do Gitleaks para a organização.
+# Ele permite que arquivos de exemplo (como .env.example) não bloqueiem o build.
+
+[allowlist]
+description = "Permite arquivos de exemplo e documentação que contenham chaves 'falsas' ou legadas"
+paths = [
+    # Ignora arquivos .env de exemplo
+    '''(?i)\.env\.example$''',
+    # Ignora arquivos de teste/mock
+    '''(?i)tests/.*mocks/.*''',
+    # Ignora documentação (README/docs) onde chaves de exemplo são comuns
+    '''(?i)README\.md$''',
+    '''(?i)docs/.*\.md$'''
+]
+
+# Você também pode adicionar stop-words ou regexes específicas aqui se necessário.
+# [allowlist]
+# stopwords = ["example-key", "dummy-token"]
