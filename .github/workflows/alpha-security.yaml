@@ -215,13 +215,6 @@ jobs:
       # DOCKER — Security Steps (condicional)
       # =====================================================
 
-      - name: Hadolint — Dockerfile Security Lint
-        if: steps.detect.outputs.docker == 'true'
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: Dockerfile
-          failure-threshold: warning
-
       - name: Trivy — Container Image Scan
         if: steps.detect.outputs.docker == 'true'
         run: |

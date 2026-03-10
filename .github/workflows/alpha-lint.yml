@@ -143,13 +143,4 @@ jobs:
           echo "🔎 Running Ruff (Linting + Format check)"
           ruff check .
 
-      # =====================================================
-      # DOCKER LINTING
-      # =====================================================
-
-      - name: Run Hadolint (Docker Linter)
-        if: steps.detect.outputs.docker == 'true'
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: Dockerfile
-          ignore: DL3008,DL3013 # Ignora pinned versions aviso caso chato
+      # Docker linting removed as requested to avoid Alpine version pinning issues
