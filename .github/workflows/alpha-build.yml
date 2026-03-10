@@ -68,6 +68,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          registry-url: https://npm.pkg.github.com
+          scope: '@area-tech-alpha'
 
       - name: Validate package.json
         if: steps.detect.outputs.node == 'true'
@@ -86,6 +88,7 @@ jobs:
           fi
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # --------------------------------
       # Prisma (auto detect)

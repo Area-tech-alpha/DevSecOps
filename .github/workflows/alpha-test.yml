@@ -109,6 +109,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          registry-url: https://npm.pkg.github.com
+          scope: '@area-tech-alpha'
 
       - name: Install Node dependencies
         if: steps.detect.outputs.node_test == 'true' && steps.cache-nm.outputs.cache-hit != 'true'
@@ -121,6 +123,7 @@ jobs:
           fi
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Prisma (auto detect) — necessário pra projetos que importam @prisma/client nos testes
       - name: Generate Prisma Client

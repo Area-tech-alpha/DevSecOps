@@ -49,26 +49,30 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          registry-url: https://npm.pkg.github.com
+          scope: '@area-tech-alpha'
 
-      - name: Cache npm
+      - name: Cache node_modules
+        id: cache-nm
         if: steps.detect.outputs.framework != 'none'
         uses: actions/cache@v4
         with:
-          path: ~/.npm
-          key: ${{ runner.os }}-npm-e2e-${{ hashFiles('**/package-lock.json') }}
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
-            ${{ runner.os }}-npm-e2e-
-            ${{ runner.os }}-npm-
+            ${{ runner.os }}-node-modules-
 
       - name: Install Dependencies
-        if: steps.detect.outputs.framework != 'none'
+        if: steps.detect.outputs.framework != 'none' && steps.cache-nm.outputs.cache-hit != 'true'
         run: |
-          echo "📦 Instalando dependências do projeto"
+          echo "📦 Instalando dependências do projeto (cache miss)"
           if [ -f package-lock.json ]; then
             npm ci --legacy-peer-deps || npm install --legacy-peer-deps
           else
             npm install --legacy-peer-deps
           fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # --------------------------------
       # Playwright specific setup

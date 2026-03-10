@@ -70,6 +70,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          registry-url: https://npm.pkg.github.com
+          scope: '@area-tech-alpha'
 
       - name: Install Project Dependencies (Node)
         if: steps.detect.outputs.node == 'true' && steps.cache-nm.outputs.cache-hit != 'true'
@@ -80,6 +82,8 @@ jobs:
           else
             npm install --legacy-peer-deps
           fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Lint Tools (Node)
         if: steps.detect.outputs.node == 'true'
