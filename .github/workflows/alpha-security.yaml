@@ -152,7 +152,7 @@ jobs:
           echo "📦 Rodando OSV Scanner (Nativo)..."
           echo '{"results":[]}' > osv-results.json
           # Usamos um arquivo temporário para evitar corrupção
-          osv-scanner scan --config="devsecops/security/osv-scanner.toml" --recursive --format json --skip-git . > osv-results.tmp.json 2>/dev/null || echo '{"results":[]}' > osv-results.tmp.json &
+          osv-scanner scan --config="devsecops/security/osv-scanner.toml" --recursive --format json --skip-git . > osv-results.tmp.json 2>/dev/null || true &
           
           echo "🛡️ Rodando Semgrep (Nativo)..."
           SEMGREP_RULES="${{ steps.detect.outputs.react == 'true' && 'p/security-audit,p/react' || 'p/security-audit' }}"
