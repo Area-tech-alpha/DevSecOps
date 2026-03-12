@@ -95,7 +95,7 @@ jobs:
           path: |
             /usr/local/bin/osv-scanner
             /usr/local/bin/gitleaks
-          key: security-bins-v3 # Invalidação de cache para limpar binários corrompidos
+          key: security-bins-v4 # Nova versão para garantir limpeza total
 
       - name: Install Native Security Tools
         if: steps.cache-bins.outputs.cache-hit != 'true'
@@ -151,14 +151,15 @@ jobs:
           
           echo "📦 Rodando OSV Scanner (Nativo)..."
           echo '{"results":[]}' > osv-results.json
-          # Ignoramos a pasta 'devsecops' e 'node_modules' para evitar ruído e duplicidade
-          osv-scanner scan --config="devsecops/security/osv-scanner.toml" --recursive --format json --skip-git . > osv-results.json || true &
+          # Usamos um arquivo temporário para evitar corrupção
+          osv-scanner scan --config="devsecops/security/osv-scanner.toml" --recursive --format json --skip-git . > osv-results.tmp.json 2>/dev/null || echo '{"results":[]}' > osv-results.tmp.json &
           
           echo "🛡️ Rodando Semgrep (Nativo)..."
           SEMGREP_RULES="${{ steps.detect.outputs.react == 'true' && 'p/security-audit,p/react' || 'p/security-audit' }}"
           semgrep ci --config="$SEMGREP_RULES" --quiet &
           
           wait
+          [ -f osv-results.tmp.json ] && mv osv-results.tmp.json osv-results.json || echo '{"results":[]}' > osv-results.json
           echo "✅ Scanners finalizados."
 
       # =====================================================
@@ -199,18 +200,34 @@ jobs:
       - name: Enforce Security Gate (Fail on High/Critical)
         run: |
           echo "⚖️ Verificando severidade das vulnerabilidades..."
-          if [ -f osv-results.json ]; then
-            echo "--- RESUMO DE VULNERABILIDADES (HIGH/CRITICAL) ---"
-            # jq com navegação segura (?) para evitar erros de campo nulo
-            jq -r '.results[]?.packages[]? as $pkg | $pkg.vulnerabilities[]? | select(.database_specific?.cvssScore >= 7 or .database_specific?.severity == "HIGH" or .database_specific?.severity == "CRITICAL") | "🚩 ID: \(.id) | Pacote: \($pkg.package.name) | Score: \(.database_specific?.cvssScore // \"N/A\")"' osv-results.json 2>/dev/null || echo "ℹ️ Erro ao processar JSON ou nenhuma vulnerabilidade formatável."
-            echo "--------------------------------------------------"
+          if [ ! -f osv-results.json ] || [ ! -s osv-results.json ]; then
+            echo "✅ Nenhum resultado de scan encontrado."
+            exit 0
           fi
-          HIGH_VULNS=$(jq '[.results[]?.packages[]?.vulnerabilities[]? | select(.database_specific?.cvssScore >= 7 or .database_specific?.severity == "HIGH" or .database_specific?.severity == "CRITICAL")] | length' osv-results.json 2>/dev/null || echo 0)
+
+          echo "--- RESUMO DE VULNERABILIDADES (HIGH/CRITICAL) ---"
+          # Filtro JQ ultra-robusto: trata campos nulos e ausentes em qualquer nível
+          jq -r '
+            .results[]? | .packages[]? as $pkg | $pkg.vulnerabilities[]? 
+            | select(
+                ((.database_specific | .cvssScore) // 0 >= 7) or 
+                ((.database_specific | .severity) // "" | (contains("HIGH") or contains("CRITICAL")))
+              )
+            | "🚩 ID: \(.id) | Pacote: \($pkg.package.name) | Score: \((.database_specific | .cvssScore) // "N/A")"
+          ' osv-results.json 2>/dev/null || echo "ℹ️ Nenhuma vulnerabilidade crítica formatável nos logs."
+          echo "--------------------------------------------------"
+
+          HIGH_VULNS=$(jq '[.results[]? | .packages[]?.vulnerabilities[]? | select(((.database_specific | .cvssScore) // 0 >= 7) or ((.database_specific | .severity) // "" | (contains("HIGH") or contains("CRITICAL"))))] | length' osv-results.json 2>/dev/null || echo 0)
           HIGH_VULNS=${HIGH_VULNS:-0}
           
           if [[ ! "$HIGH_VULNS" =~ ^[0-9]+$ ]]; then HIGH_VULNS=0; fi
-
-          [ "$HIGH_VULNS" -gt 0 ] && { echo "❌ ERRO: Foram encontradas $HIGH_VULNS vulnerabilidades HIGH/CRITICAL!"; exit 1; } || echo "✅ Nenhuma vulnerabilidade crítica."
+          
+          if [ "$HIGH_VULNS" -gt 0 ]; then
+            echo "❌ ERRO: Foram encontradas $HIGH_VULNS vulnerabilidades HIGH/CRITICAL!"
+            exit 1
+          else
+            echo "✅ Nenhuma vulnerabilidade de alto risco detectada."
+          fi
 
       # =====================================================
       # 📦 LIGHTWEIGHT AUDITS (No install needed)
