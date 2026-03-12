@@ -134,14 +134,35 @@ jobs:
         run: |
           echo "💡 Calculando melhores versões para atualização (Latest Version Strategy)..."
           
-          # Procura por lockfiles comuns e roda o scanner em cada um.
-          find . -name "package-lock.json" -o -name "yarn.lock" -o -name "pnpm-lock.yaml" -o -name "go.sum" -o -name "requirements.txt" -o -name "Pipfile.lock" -o -name "poetry.lock" | while read -r file; do
-            echo "🔍 Analisando remediation para: $file"
-            REL_FILE=${file#./}
-            docker run --rm \
-              -v ${{ github.workspace }}:/repo \
-              ghcr.io/google/osv-scanner:latest \
-              fix --strategy=relax --upgrade-config=major -L "/repo/$REL_FILE" || true
+          # A estratégia 'relax' exige tanto o lockfile quanto o manifesto (ex: package.json + package-lock.json).
+          # Vamos mapear os pares conhecidos e rodar o scanner de forma precisa.
+          find . -name "package-lock.json" -o -name "yarn.lock" -o -name "pnpm-lock.yaml" -o -name "go.sum" -o -name "Pipfile.lock" -o -name "poetry.lock" | while read -r lockfile; do
+            DIR=$(dirname "$lockfile")
+            BASE=$(basename "$lockfile")
+            MANIFEST=""
+            case "$BASE" in
+              "package-lock.json"|"yarn.lock"|"pnpm-lock.yaml") MANIFEST="$DIR/package.json" ;;
+              "go.sum") MANIFEST="$DIR/go.mod" ;;
+              "Pipfile.lock") MANIFEST="$DIR/Pipfile" ;;
+              "poetry.lock") MANIFEST="$DIR/pyproject.toml" ;;
+            esac
+
+            REL_LOCK=${lockfile#./}
+            
+            if [ -n "$MANIFEST" ] && [ -f "$MANIFEST" ]; then
+              REL_MANIFEST=${MANIFEST#./}
+              echo "🔍 Analisando par: $REL_MANIFEST + $REL_LOCK"
+              docker run --rm \
+                -v ${{ github.workspace }}:/repo \
+                ghcr.io/google/osv-scanner:latest \
+                fix --strategy=relax --upgrade-config=major -M "/repo/$REL_MANIFEST" -L "/repo/$REL_LOCK" || true
+            else
+              echo "🔍 Analisando lockfile individual (advice limitado): $REL_LOCK"
+              docker run --rm \
+                -v ${{ github.workspace }}:/repo \
+                ghcr.io/google/osv-scanner:latest \
+                fix --strategy=relax --upgrade-config=major -L "/repo/$REL_LOCK" || true
+            fi
           done
 
       - name: Enforce Security Gate (Fail on High/Critical)
