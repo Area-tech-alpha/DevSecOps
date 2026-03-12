@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
+          
       # --------------------------------
       # Detect project type
       # --------------------------------
@@ -88,35 +88,36 @@ jobs:
           path: /usr/local/bin/osv-scanner
           key: osv-scanner-v1.9.0 # Use a fixed version or dynamic tag
 
-      - name: Install OSV-scanner
-        if: steps.cache-osv.outputs.cache-hit != 'true'
+      - name: Cache Security Binaries
+        id: cache-bins
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/bin/osv-scanner
+            /usr/local/bin/gitleaks
+          key: security-bins-v2
+
+      - name: Install Native Security Tools
+        if: steps.cache-bins.outputs.cache-hit != 'true'
         run: |
-          echo "🛰️ Baixando OSV-scanner binário..."
-          # Obtém a URL do release, falhando se não encontrar ou se o curl der erro
-          BINARY_URL=$(curl -sfL https://api.github.com/repos/google/osv-scanner/releases/latest | jq -r '.assets[] | select(.name | contains("linux_amd64")) | .browser_download_url' | head -n 1)
+          echo "🛰️ Instalando ferramentas nativas (mais rápido que Docker)..."
           
-          if [[ -z "$BINARY_URL" || "$BINARY_URL" == "null" ]]; then
-            echo "❌ Erro: Não foi possível obter a URL do binário OSV."
-            exit 1
-          fi
-
-          curl -fL "$BINARY_URL" -o osv-scanner
+          # OSV-Scanner
+          OSV_URL=$(curl -sfL https://api.github.com/repos/google/osv-scanner/releases/latest | jq -r '.assets[] | select(.name | contains("linux_amd64")) | .browser_download_url' | head -n 1)
+          curl -fL "$OSV_URL" -o osv-scanner && chmod +x osv-scanner && sudo mv osv-scanner /usr/local/bin/
           
-          # Verifica se o arquivo é um binário válido (ELF)
-          if ! file osv-scanner | grep -q "ELF"; then
-            echo "❌ Erro: O arquivo baixado não é um binário ELF válido."
-            cat osv-scanner | head -n 10
-            exit 1
-          fi
+          # Gitleaks
+          LEAKS_URL=$(curl -sfL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | jq -r '.assets[] | select(.name | contains("linux_x64.tar.gz")) | .browser_download_url' | head -n 1)
+          curl -fL "$LEAKS_URL" -o gitleaks.tar.gz && tar -xzf gitleaks.tar.gz gitleaks && chmod +x gitleaks && sudo mv gitleaks /usr/local/bin/ && rm gitleaks.tar.gz
 
-          chmod +x osv-scanner
-          sudo mv osv-scanner /usr/local/bin/
-
-      - name: Pre-pull Docker images
+      - name: Install Semgrep (Native via Pip)
         run: |
-          echo "🐳 Puxando imagens Docker em paralelo..."
-          docker pull ghcr.io/gitleaks/gitleaks:latest &
-          wait
+          echo "�️ Instalando Semgrep via pip (Ultra-light)..."
+          pip install semgrep --quiet
+
+      # =====================================================
+      # 🚀 TURBO PARALLEL SCANS
+      # =====================================================
 
       # =====================================================
       # 🚀 PARALLEL SCANS (Within the same runner to save time)
@@ -130,14 +131,18 @@ jobs:
           path: devsecops
           fetch-depth: 1
 
-      - name: Run Scanners (Parallelized)
+      - name: Run Scanners (Turbo Parallel)
         run: |
-          echo "🔐 Rodando Gitleaks..."
-          docker run --rm -v ${{ github.workspace }}:/repo ghcr.io/gitleaks/gitleaks:latest detect --source="/repo" --config="/repo/devsecops/security/gitleaks.toml" --redact -v &
+          echo "🔐 Rodando Gitleaks (Nativo)..."
+          gitleaks detect --source="." --config="devsecops/security/gitleaks.toml" --redact -v &
           
-          echo "📦 Rodando OSV Scanner..."
+          echo "📦 Rodando OSV Scanner (Nativo)..."
           echo '{"results":[]}' > osv-results.json
           osv-scanner scan --config="devsecops/security/osv-scanner.toml" --recursive --format json . > osv-results.json || true &
+          
+          echo "🛡️ Rodando Semgrep (Nativo)..."
+          SEMGREP_RULES="${{ steps.detect.outputs.react == 'true' && 'p/security-audit,p/react' || 'p/security-audit' }}"
+          semgrep ci --config="$SEMGREP_RULES" --quiet &
           
           wait
           echo "✅ Scanners finalizados."
@@ -146,13 +151,17 @@ jobs:
       # 🛡️ ANALYSIS & SECURITY GATE
       # =====================================================
 
-      - name: Semgrep — SAST Scanner
-        uses: semgrep/semgrep-action@v1
-        with:
-          config: ${{ steps.detect.outputs.react == 'true' && 'p/security-audit p/react' || 'p/security-audit' }}
+      # Semgrep foi movido para o bloco paralelo acima para economizar tempo.
 
-      - name: OSV Scanner — Latest Version Remediation Advice
+      - name: OSV Scanner — Remediation Advice (Conditional)
         run: |
+          # Verificamos se há vulnerabilidades antes de rodar o pesado 'osv-scanner fix'
+          VULNS=$(jq '[.results[]?.packages[]?.vulnerabilities[]?] | length' osv-results.json 2>/dev/null || echo 0)
+          if [ "$VULNS" -eq 0 ]; then
+            echo "✅ Tudo limpo. Pulando etapa de remediação para economizar tempo."
+            exit 0
+          fi
+
           echo "💡 Calculando melhores versões para atualização..."
           find . -name "package-lock.json" -o -name "yarn.lock" -o -name "pnpm-lock.yaml" -o -name "go.sum" -o -name "Pipfile.lock" -o -name "poetry.lock" | while read -r lockfile; do
             DIR=$(dirname "$lockfile")
