@@ -126,7 +126,7 @@ jobs:
           docker run --rm \
             -v ${{ github.workspace }}:/repo \
             ghcr.io/google/osv-scanner:latest \
-            scan --config="/repo/security/osv-scanner.toml" \
+            scan --config="/repo/devsecops/security/osv-scanner.toml" \
             --recursive \
             --format json /repo > osv-results.json || true
 
@@ -134,9 +134,12 @@ jobs:
         run: |
           echo "⚖️ Verificando severidade das vulnerabilidades..."
           
-          # O silenciador || echo 0 garante que não quebre se o JSON estiver vazio de resultados
-          HIGH_VULNS=$(jq '[.results[]?.packages[]?.vulnerabilities[]? | select(.database_specific.cvssScore >= 7 or .database_specific.severity == "HIGH" or .database_specific.severity == "CRITICAL")] | length' osv-results.json || echo 0)
+          # Garante que HIGH_VULNS tenha um valor numérico válido, mesmo em caso de erro no jq
+          HIGH_VULNS=$(jq '[.results[]?.packages[]?.vulnerabilities[]? | select(.database_specific.cvssScore >= 7 or .database_specific.severity == "HIGH" or .database_specific.severity == "CRITICAL")] | length' osv-results.json 2>/dev/null || echo 0)
           
+          # Fallback se a string retornar vazia por algum motivo
+          if [ -z "$HIGH_VULNS" ]; then HIGH_VULNS=0; fi
+
           if [ "$HIGH_VULNS" -gt 0 ]; then
             echo "❌ ERRO: Foram encontradas $HIGH_VULNS vulnerabilidades de nível HIGH ou CRITICAL!"
             exit 1
@@ -147,10 +150,18 @@ jobs:
       - name: OSV Scanner — Latest Version Remediation Advice
         run: |
           echo "💡 Calculando melhores versões para atualização (Latest Version Strategy)..."
-          docker run --rm \
-            -v ${{ github.workspace }}:/repo \
-            ghcr.io/google/osv-scanner:latest \
-            fix --strategy=relax --upgrade-config=major /repo || true
+          
+          # O comando 'fix' da estratégia 'relax' exige arquivos de manifesto específicos.
+          # Vamos procurar por lockfiles comuns e rodar o scanner em cada um.
+          find . -name "package-lock.json" -o -name "yarn.lock" -o -name "pnpm-lock.yaml" -o -name "go.sum" -o -name "requirements.txt" -o -name "Pipfile.lock" -o -name "poetry.lock" | while read -r file; do
+            echo "🔍 Analisando remediation para: $file"
+            # Remove o './' do início para o path ficar correto no mount do docker
+            REL_FILE=${file#./}
+            docker run --rm \
+              -v ${{ github.workspace }}:/repo \
+              ghcr.io/google/osv-scanner:latest \
+              fix --strategy=relax --upgrade-config=major -L "/repo/$REL_FILE" || true
+          done
 
       # =====================================================
       # NODE.JS — Security Steps (condicional)
