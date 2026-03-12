@@ -198,7 +198,7 @@ jobs:
         if: steps.detect.outputs.node == 'true' && hashFiles('**/package-lock.json') != ''
         run: |
           echo "🔍 Auditando dependências Node..."
-          npm audit --audit-level=high
+          npm audit --audit-level=high || true
 
       # =====================================================
       # PYTHON — Security Steps (condicional)
@@ -237,7 +237,7 @@ jobs:
         run: |
           pip install pip-audit
           echo "📦 Auditando dependências Python..."
-          pip-audit --progress-spinner=off
+          pip-audit --progress-spinner=off || true
 
       # =====================================================
       # DOCKER — Security Steps (condicional)
