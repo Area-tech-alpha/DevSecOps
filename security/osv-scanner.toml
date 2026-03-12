@@ -1,0 +1,11 @@
+# 🛡️ OSV-Scanner Hardening Configuration
+# Centralized policy for Area-tech-alpha
+
+# Use this section to ignore vulnerabilities with specific reasons or expiry dates
+# [[IgnoredVulns]]
+# id = "GO-2022-0968"
+# reason = "Not applicable to our usage of the package"
+# ignoreUntil = 2024-01-01
+
+# Note: Remediation strategy and recursive flags are handled via CLI in the workflow 
+# to ensure compatibility with version 2.3.3.
