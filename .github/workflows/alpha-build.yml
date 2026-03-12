@@ -65,7 +65,7 @@ jobs:
       # =====================================================
 
       - name: Setup Node
-        if: steps.detect.outputs.node == 'true'
+        if: steps.detect.outputs.node == 'true' && steps.detect.outputs.docker != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -73,7 +73,7 @@ jobs:
           scope: '@area-tech-alpha'
 
       - name: Validate package.json
-        if: steps.detect.outputs.node == 'true'
+        if: steps.detect.outputs.node == 'true' && steps.detect.outputs.docker != 'true'
         run: |
           node -e "JSON.parse(require('fs').readFileSync('package.json'))"
 
@@ -104,7 +104,7 @@ jobs:
       # --------------------------------
 
       - name: Generate Prisma Client
-        if: steps.detect.outputs.node == 'true'
+        if: steps.detect.outputs.node == 'true' && steps.detect.outputs.docker != 'true'
         env:
           # DATABASE_URL dummy — prisma generate só lê o schema, não conecta ao banco.
           # Sem isso, projetos que carregam prisma.config.ts/js falham com PrismaConfigEnvError.
@@ -120,7 +120,7 @@ jobs:
       # --------------------------------
 
       - name: Node Build
-        if: steps.detect.outputs.node == 'true'
+        if: steps.detect.outputs.node == 'true' && steps.detect.outputs.docker != 'true'
         run: |
           if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
             echo "🏗 Running build"
@@ -136,7 +136,7 @@ jobs:
       # =====================================================
 
       - name: Type Check
-        if: steps.detect.outputs.typescript == 'true'
+        if: steps.detect.outputs.typescript == 'true' && steps.detect.outputs.docker != 'true'
         run: |
           echo "🔎 Running TypeScript type check"
           npx tsc --noEmit

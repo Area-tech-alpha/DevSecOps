@@ -92,8 +92,23 @@ jobs:
         if: steps.cache-osv.outputs.cache-hit != 'true'
         run: |
           echo "🛰️ Baixando OSV-scanner binário..."
-          BINARY_URL=$(curl -s https://api.github.com/repos/google/osv-scanner/releases/latest | grep "browser_download_url.*linux_amd64" | head -n 1 | cut -d '"' -f 4)
-          curl -L "$BINARY_URL" -o osv-scanner
+          # Obtém a URL do release, falhando se não encontrar ou se o curl der erro
+          BINARY_URL=$(curl -sfL https://api.github.com/repos/google/osv-scanner/releases/latest | jq -r '.assets[] | select(.name | contains("linux_amd64")) | .browser_download_url' | head -n 1)
+          
+          if [[ -z "$BINARY_URL" || "$BINARY_URL" == "null" ]]; then
+            echo "❌ Erro: Não foi possível obter a URL do binário OSV."
+            exit 1
+          fi
+
+          curl -fL "$BINARY_URL" -o osv-scanner
+          
+          # Verifica se o arquivo é um binário válido (ELF)
+          if ! file osv-scanner | grep -q "ELF"; then
+            echo "❌ Erro: O arquivo baixado não é um binário ELF válido."
+            cat osv-scanner | head -n 10
+            exit 1
+          fi
+
           chmod +x osv-scanner
           sudo mv osv-scanner /usr/local/bin/
 
@@ -167,6 +182,10 @@ jobs:
             echo "--------------------------------------------------"
           fi
           HIGH_VULNS=$(jq '[.results[]?.packages[]?.vulnerabilities[]? | select(.database_specific.cvssScore >= 7 or .database_specific.severity == "HIGH" or .database_specific.severity == "CRITICAL")] | length' osv-results.json 2>/dev/null || echo 0)
+          HIGH_VULNS=${HIGH_VULNS:-0}
+          
+          if [[ ! "$HIGH_VULNS" =~ ^[0-9]+$ ]]; then HIGH_VULNS=0; fi
+
           [ "$HIGH_VULNS" -gt 0 ] && { echo "❌ ERRO: Foram encontradas $HIGH_VULNS vulnerabilidades HIGH/CRITICAL!"; exit 1; } || echo "✅ Nenhuma vulnerabilidade crítica."
 
       # =====================================================
