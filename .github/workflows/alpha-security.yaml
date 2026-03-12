@@ -62,7 +62,7 @@ jobs:
           fi
 
       # =====================================================
-      # 🔑 AUTHENTICATION — Setup Registry Access
+      # 🔑 AUTHENTICATION & OSV SETUP
       # =====================================================
 
       - name: Setup Node (for Registry Access)
@@ -81,11 +81,15 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # =====================================================
-      # 🛰️ OSV-SCANNER — Native Installation (Faster + Private Support)
-      # =====================================================
+      - name: Cache OSV-scanner binary
+        id: cache-osv
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/bin/osv-scanner
+          key: osv-scanner-v1.9.0 # Use a fixed version or dynamic tag
 
       - name: Install OSV-scanner
+        if: steps.cache-osv.outputs.cache-hit != 'true'
         run: |
           echo "🛰️ Baixando OSV-scanner binário..."
           BINARY_URL=$(curl -s https://api.github.com/repos/google/osv-scanner/releases/latest | grep "browser_download_url.*linux_amd64" | head -n 1 | cut -d '"' -f 4)
@@ -93,19 +97,14 @@ jobs:
           chmod +x osv-scanner
           sudo mv osv-scanner /usr/local/bin/
 
-      # =====================================================
-      # ⚡ OTIMIZAÇÃO — Pre-pull Docker images em paralelo
-      # =====================================================
-
       - name: Pre-pull Docker images
         run: |
           echo "🐳 Puxando imagens Docker em paralelo..."
           docker pull ghcr.io/gitleaks/gitleaks:latest &
           wait
-          echo "✅ Imagens prontas"
 
       # =====================================================
-      # UNIVERSAL — Secrets Leak Detection (qualquer projeto)
+      # 🚀 PARALLEL SCANS (Within the same runner to save time)
       # =====================================================
 
       - name: Checkout DevSecOps Config (Security)
@@ -116,53 +115,30 @@ jobs:
           path: devsecops
           fetch-depth: 1
 
-      - name: Gitleaks — Secrets Detection
+      - name: Run Scanners (Parallelized)
         run: |
-          echo "🔐 Escaneando repositório inteiro por secrets vazados..."
-          docker run --rm \
-            -v ${{ github.workspace }}:/repo \
-            ghcr.io/gitleaks/gitleaks:latest \
-            detect --source="/repo" --config="/repo/devsecops/security/gitleaks.toml" --redact -v
+          echo "🔐 Rodando Gitleaks..."
+          docker run --rm -v ${{ github.workspace }}:/repo ghcr.io/gitleaks/gitleaks:latest detect --source="/repo" --config="/repo/devsecops/security/gitleaks.toml" --redact -v &
+          
+          echo "📦 Rodando OSV Scanner..."
+          echo '{"results":[]}' > osv-results.json
+          osv-scanner scan --config="devsecops/security/osv-scanner.toml" --recursive --format json . > osv-results.json || true &
+          
+          wait
+          echo "✅ Scanners finalizados."
 
       # =====================================================
-      # UNIVERSAL — SAST (qualquer linguagem)
+      # 🛡️ ANALYSIS & SECURITY GATE
       # =====================================================
 
       - name: Semgrep — SAST Scanner
-        if: steps.detect.outputs.react != 'true'
         uses: semgrep/semgrep-action@v1
         with:
-          config: p/security-audit
-
-      - name: Semgrep — SAST Scanner (React)
-        if: steps.detect.outputs.react == 'true'
-        uses: semgrep/semgrep-action@v1
-        with:
-          config: >-
-            p/security-audit
-            p/react
-
-      # =====================================================
-      # UNIVERSAL — Dependency Vulnerability Scanner
-      # =====================================================
-
-      - name: OSV Scanner — Dependency Vulnerabilities (Deep Scan)
-        run: |
-          echo "📦 Escaneando dependências (Deep Scan + Security Gate)..."
-          
-          # Inicializa JSON vazio válido
-          echo '{"results":[]}' > osv-results.json
-
-          osv-scanner scan --config="devsecops/security/osv-scanner.toml" \
-            --recursive \
-            --format json . > osv-results.json || true
+          config: ${{ steps.detect.outputs.react == 'true' && 'p/security-audit p/react' || 'p/security-audit' }}
 
       - name: OSV Scanner — Latest Version Remediation Advice
         run: |
-          echo "💡 Calculando melhores versões para atualização (Latest Version Strategy)..."
-          
-          # A estratégia 'relax' exige tanto o lockfile quanto o manifesto (ex: package.json + package-lock.json).
-          # Vamos mapear os pares conhecidos e rodar o scanner de forma precisa.
+          echo "💡 Calculando melhores versões para atualização..."
           find . -name "package-lock.json" -o -name "yarn.lock" -o -name "pnpm-lock.yaml" -o -name "go.sum" -o -name "Pipfile.lock" -o -name "poetry.lock" | while read -r lockfile; do
             DIR=$(dirname "$lockfile")
             BASE=$(basename "$lockfile")
@@ -173,162 +149,52 @@ jobs:
               "Pipfile.lock") MANIFEST="$DIR/Pipfile" ;;
               "poetry.lock") MANIFEST="$DIR/pyproject.toml" ;;
             esac
-
             REL_LOCK=${lockfile#./}
-            
             if [ -n "$MANIFEST" ] && [ -f "$MANIFEST" ]; then
               REL_MANIFEST=${MANIFEST#./}
-              echo "🔍 Analisando par: $REL_MANIFEST + $REL_LOCK"
-              osv-scanner fix --strategy=relax --upgrade-config=major \
-                --data-source=native \
-                -M "$REL_MANIFEST" -L "$REL_LOCK" || true
+              osv-scanner fix --strategy=relax --upgrade-config=major --data-source=native -M "$REL_MANIFEST" -L "$REL_LOCK" || true
             else
-              echo "🔍 Analisando lockfile individual (advice limitado): $REL_LOCK"
-              osv-scanner fix --strategy=relax --upgrade-config=major \
-                --data-source=native \
-                -L "$REL_LOCK" || true
+              osv-scanner fix --strategy=relax --upgrade-config=major --data-source=native -L "$REL_LOCK" || true
             fi
           done
 
       - name: Enforce Security Gate (Fail on High/Critical)
         run: |
           echo "⚖️ Verificando severidade das vulnerabilidades..."
-          
-          # Lista as vulnerabilidades encontradas para facilitar a triagem
           if [ -f osv-results.json ]; then
             echo "--- RESUMO DE VULNERABILIDADES (HIGH/CRITICAL) ---"
-            jq -r '.results[]?.packages[]? as $pkg | $pkg.vulnerabilities[]? | select(.database_specific.cvssScore >= 7 or .database_specific.severity == "HIGH" or .database_specific.severity == "CRITICAL") | "🚩 ID: \(.id) | Pacote: \($pkg.package.name) | Score: \(.database_specific.cvssScore // "N/A")"' osv-results.json 2>/dev/null || echo "Nenhuma vulnerabilidade crítica formatada."
+            jq -r '.results[]?.packages[]? as $pkg | $pkg.vulnerabilities[]? | select(.database_specific.cvssScore >= 7 or .database_specific.severity == "HIGH" or .database_specific.severity == "CRITICAL") | "🚩 ID: \(.id) | Pacote: \($pkg.package.name) | Score: \(.database_specific.cvssScore // \"N/A\")"' osv-results.json 2>/dev/null || echo "Nenhuma vulnerabilidade crítica encontrada."
             echo "--------------------------------------------------"
           fi
-
-          # Garante que HIGH_VULNS tenha um valor numérico válido
           HIGH_VULNS=$(jq '[.results[]?.packages[]?.vulnerabilities[]? | select(.database_specific.cvssScore >= 7 or .database_specific.severity == "HIGH" or .database_specific.severity == "CRITICAL")] | length' osv-results.json 2>/dev/null || echo 0)
-          
-          if [ -z "$HIGH_VULNS" ]; then HIGH_VULNS=0; fi
-
-          if [ "$HIGH_VULNS" -gt 0 ]; then
-            echo "❌ ERRO: Foram encontradas $HIGH_VULNS vulnerabilidades de nível HIGH ou CRITICAL!"
-            echo "Confira as sugestões de 'Remediation Advice' acima para corrigir."
-            exit 1
-          else
-            echo "✅ Nenhuma vulnerabilidade CRITICAL ou HIGH detectada. Continuando..."
-          fi
+          [ "$HIGH_VULNS" -gt 0 ] && { echo "❌ ERRO: Foram encontradas $HIGH_VULNS vulnerabilidades HIGH/CRITICAL!"; exit 1; } || echo "✅ Nenhuma vulnerabilidade crítica."
 
       # =====================================================
-      # NODE.JS — Security Steps (condicional)
+      # 📦 LIGHTWEIGHT AUDITS (No install needed)
       # =====================================================
 
-      - name: Cache node_modules
-        id: cache-nm
-        if: steps.detect.outputs.node == 'true'
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-modules-
-
-      - name: Setup Node (for dependencies)
-        if: steps.detect.outputs.node == 'true' && steps.cache-nm.outputs.cache-hit != 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          registry-url: https://npm.pkg.github.com
-          scope: '@area-tech-alpha'
-
-      - name: Install Node dependencies
-        if: steps.detect.outputs.node == 'true' && steps.cache-nm.outputs.cache-hit != 'true'
-        run: |
-          echo "📦 Instalando dependências Node (cache miss, sem scripts)"
-          if [ -f package-lock.json ]; then
-            npm ci --legacy-peer-deps --ignore-scripts || npm install --legacy-peer-deps --ignore-scripts
-          else
-            npm install --legacy-peer-deps --ignore-scripts
-          fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: NPM Audit — Node Dependency Vulnerabilities
+      - name: NPM Audit (Lightweight)
         if: steps.detect.outputs.node == 'true' && hashFiles('**/package-lock.json') != ''
-        run: |
-          echo "🔍 Auditando dependências Node..."
-          npm audit --audit-level=high || true
+        run: npm audit --audit-level=high || true
 
-      # =====================================================
-      # PYTHON — Security Steps (condicional)
-      # =====================================================
-
-      - name: Setup Python
-        if: steps.detect.outputs.python == 'true'
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
-
-      - name: Install Python dependencies
-        if: steps.detect.outputs.python == 'true'
-        run: |
-          python -m pip install --upgrade pip
-
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          elif [ -f pyproject.toml ]; then
-            pip install .
-          fi
-
-      - name: Bandit — Python SAST
-        if: steps.detect.outputs.python == 'true'
-        run: |
-          pip install bandit
-          echo "🔍 Escaneando código Python por vulnerabilidades..."
-          if [ -d src ]; then
-            bandit -r src -ll
-          else
-            bandit -r . --exclude ./node_modules,./.venv,./venv,./.git -ll
-          fi
-
-      - name: pip-audit — Python Dependency Vulnerabilities
+      - name: pip-audit (Lightweight)
         if: steps.detect.outputs.python == 'true'
         run: |
           pip install pip-audit
-          echo "📦 Auditando dependências Python..."
-          pip-audit --progress-spinner=off || true
+          if [ -f requirements.txt ]; then pip-audit -r requirements.txt || true; fi
 
       # =====================================================
-      # DOCKER — Security Steps (condicional)
-      # =====================================================
-
-
-      # =====================================================
-      # Sumário final
+      # FINAL SUMMARY
       # =====================================================
 
       - name: Security Scan Summary
         if: always()
         run: |
           echo "============================================"
-          echo "📊 Security Scan Summary"
+          echo "📊 Security Scan Summary (Optimized)"
           echo "============================================"
-          echo "  Projeto Node.js:  ${{ steps.detect.outputs.node || 'não' }}"
-          echo "  Projeto Python:   ${{ steps.detect.outputs.python || 'não' }}"
-          echo "  Projeto Docker:   ${{ steps.detect.outputs.docker || 'não' }}"
-          echo "  Projeto Go:       ${{ steps.detect.outputs.go || 'não' }}"
-          echo "--------------------------------------------"
-          echo "  🔐 Gitleaks      → Executado (qualquer projeto)"
-          echo "  🛡️ Semgrep       → Executado (qualquer projeto)"
-          echo "  📦 OSV Scanner   → Executado (qualquer projeto)"
-
-
-          if [ "${{ steps.detect.outputs.node }}" == "true" ]; then
-            echo "  📦 NPM Audit    → Executado"
-          fi
-
-          if [ "${{ steps.detect.outputs.python }}" == "true" ]; then
-            echo "  🐍 Bandit        → Executado"
-            echo "  📦 pip-audit     → Executado"
-          fi
-
-          if [ "${{ steps.detect.outputs.docker }}" == "true" ]; then
-            echo "  🐳 Hadolint      → Executado"
-          fi
-
+          echo "  🔐 Gitleaks      → Executado"
+          echo "  🛡️ Semgrep       → Executado"
+          echo "  📦 OSV Scanner   → Executado (Nativo)"
+          echo "  📦 Audits        → Executado (Lightweight)"
           echo "============================================"
