@@ -62,15 +62,45 @@ jobs:
           fi
 
       # =====================================================
+      # 🔑 AUTHENTICATION — Setup Registry Access
+      # =====================================================
+
+      - name: Setup Node (for Registry Access)
+        if: steps.detect.outputs.node == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: https://npm.pkg.github.com
+          scope: '@area-tech-alpha'
+
+      - name: Create .npmrc for Auth
+        if: steps.detect.outputs.node == 'true'
+        run: |
+          echo "@area-tech-alpha:registry=https://npm.pkg.github.com/" > .npmrc
+          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> .npmrc
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # =====================================================
+      # 🛰️ OSV-SCANNER — Native Installation (Faster + Private Support)
+      # =====================================================
+
+      - name: Install OSV-scanner
+        run: |
+          echo "🛰️ Baixando OSV-scanner binário..."
+          BINARY_URL=$(curl -s https://api.github.com/repos/google/osv-scanner/releases/latest | grep "browser_download_url.*linux_amd64" | head -n 1 | cut -d '"' -f 4)
+          curl -L "$BINARY_URL" -o osv-scanner
+          chmod +x osv-scanner
+          sudo mv osv-scanner /usr/local/bin/
+
+      # =====================================================
       # ⚡ OTIMIZAÇÃO — Pre-pull Docker images em paralelo
-      # Puxa todas as imagens de uma vez antes dos scans.
       # =====================================================
 
       - name: Pre-pull Docker images
         run: |
           echo "🐳 Puxando imagens Docker em paralelo..."
           docker pull ghcr.io/gitleaks/gitleaks:latest &
-          docker pull ghcr.io/google/osv-scanner:latest &
           wait
           echo "✅ Imagens prontas"
 
@@ -123,12 +153,9 @@ jobs:
           # Inicializa JSON vazio válido
           echo '{"results":[]}' > osv-results.json
 
-          docker run --rm \
-            -v ${{ github.workspace }}:/repo \
-            ghcr.io/google/osv-scanner:latest \
-            scan --config="/repo/devsecops/security/osv-scanner.toml" \
+          osv-scanner scan --config="devsecops/security/osv-scanner.toml" \
             --recursive \
-            --format json /repo > osv-results.json || true
+            --format json . > osv-results.json || true
 
       - name: OSV Scanner — Latest Version Remediation Advice
         run: |
@@ -152,16 +179,14 @@ jobs:
             if [ -n "$MANIFEST" ] && [ -f "$MANIFEST" ]; then
               REL_MANIFEST=${MANIFEST#./}
               echo "🔍 Analisando par: $REL_MANIFEST + $REL_LOCK"
-              docker run --rm \
-                -v ${{ github.workspace }}:/repo \
-                ghcr.io/google/osv-scanner:latest \
-                fix --strategy=relax --upgrade-config=major -M "/repo/$REL_MANIFEST" -L "/repo/$REL_LOCK" || true
+              osv-scanner fix --strategy=relax --upgrade-config=major \
+                --data-source=native \
+                -M "$REL_MANIFEST" -L "$REL_LOCK" || true
             else
               echo "🔍 Analisando lockfile individual (advice limitado): $REL_LOCK"
-              docker run --rm \
-                -v ${{ github.workspace }}:/repo \
-                ghcr.io/google/osv-scanner:latest \
-                fix --strategy=relax --upgrade-config=major -L "/repo/$REL_LOCK" || true
+              osv-scanner fix --strategy=relax --upgrade-config=major \
+                --data-source=native \
+                -L "$REL_LOCK" || true
             fi
           done
 
@@ -203,21 +228,13 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-node-modules-
 
-      - name: Setup Node
-        if: steps.detect.outputs.node == 'true'
+      - name: Setup Node (for dependencies)
+        if: steps.detect.outputs.node == 'true' && steps.cache-nm.outputs.cache-hit != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           registry-url: https://npm.pkg.github.com
           scope: '@area-tech-alpha'
-
-      - name: Create .npmrc for Auth
-        if: steps.detect.outputs.node == 'true' && steps.cache-nm.outputs.cache-hit != 'true'
-        run: |
-          echo "@area-tech-alpha:registry=https://npm.pkg.github.com/" > .npmrc
-          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> .npmrc
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Node dependencies
         if: steps.detect.outputs.node == 'true' && steps.cache-nm.outputs.cache-hit != 'true'
