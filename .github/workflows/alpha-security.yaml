@@ -2,7 +2,6 @@ name: Alpha Security
 
 on:
   workflow_call:
-
   pull_request:
     branches:
       - main
@@ -14,7 +13,7 @@ permissions:
 
 jobs:
   security:
-    name: "Universal Security"
+    name: Universal Security
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -22,10 +21,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          
-      # --------------------------------
-      # Detect project type
-      # --------------------------------
+
+# =====================================================
+# 🔎 Detect project type
+# =====================================================
+
       - name: Detect project type
         id: detect
         run: |
@@ -33,47 +33,46 @@ jobs:
 
           if [ -f package.json ]; then
             echo "node=true" >> $GITHUB_OUTPUT
-            echo "✅ Node.js detectado"
+            echo "✅ Node detectado"
 
-            # Detecta React (dependencies ou devDependencies)
             if node -e "
               const pkg = require('./package.json');
               const deps = { ...pkg.dependencies, ...pkg.devDependencies };
               process.exit(deps['react'] ? 0 : 1);
-            " 2>/dev/null; then
+            "; then
               echo "react=true" >> $GITHUB_OUTPUT
-              echo "⚛️  React detectado"
+              echo "⚛️ React detectado"
             fi
           fi
 
-          if [ -f requirements.txt ] || [ -f pyproject.toml ] || [ -f setup.py ] || [ -f Pipfile ]; then
+          if [ -f requirements.txt ] || [ -f pyproject.toml ]; then
             echo "python=true" >> $GITHUB_OUTPUT
-            echo "✅ Python detectado"
+            echo "🐍 Python detectado"
           fi
 
           if [ -f Dockerfile ]; then
             echo "docker=true" >> $GITHUB_OUTPUT
-            echo "✅ Docker detectado"
+            echo "🐳 Docker detectado"
           fi
 
           if [ -f go.mod ]; then
             echo "go=true" >> $GITHUB_OUTPUT
-            echo "✅ Go detectado"
+            echo "🐹 Go detectado"
           fi
 
-      # =====================================================
-      # 🔑 AUTHENTICATION & OSV SETUP
-      # =====================================================
+# =====================================================
+# 🔑 Node Setup
+# =====================================================
 
-      - name: Setup Node (for Registry Access)
+      - name: Setup Node
         if: steps.detect.outputs.node == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: 20
           registry-url: https://npm.pkg.github.com
           scope: '@area-tech-alpha'
 
-      - name: Create .npmrc for Auth
+      - name: Configure npm auth
         if: steps.detect.outputs.node == 'true'
         run: |
           echo "@area-tech-alpha:registry=https://npm.pkg.github.com/" > .npmrc
@@ -81,62 +80,43 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Cache OSV-scanner binary
-        id: cache-osv
-        uses: actions/cache@v4
-        with:
-          path: /usr/local/bin/osv-scanner
-          key: osv-scanner-v1.9.0 # Use a fixed version or dynamic tag
+# =====================================================
+# ⚡ Install security tools
+# =====================================================
 
-      - name: Cache Security Binaries
-        id: cache-bins
-        uses: actions/cache@v4
-        with:
-          path: |
-            /usr/local/bin/osv-scanner
-            /usr/local/bin/gitleaks
-          key: security-bins-v4 # Nova versão para garantir limpeza total
-
-      - name: Install Native Security Tools
-        if: steps.cache-bins.outputs.cache-hit != 'true'
+      - name: Install OSV Scanner
         run: |
-          echo "🛰️ Instalando ferramentas nativas (mais rápido que Docker)..."
-          
-          # OSV-Scanner
-          OSV_URL=$(curl -sfL https://api.github.com/repos/google/osv-scanner/releases/latest | jq -r '.assets[] | select(.name | contains("linux_amd64")) | .browser_download_url' | head -n 1)
-          curl -fL "$OSV_URL" -o osv-scanner && chmod +x osv-scanner
-          
-          # Validação Rigorosa: Verifica se é um binário ELF
-          if ! file osv-scanner | grep -q "ELF"; then
-            echo "❌ ERRO: O download do osv-scanner falhou ou retornou um arquivo inválido."
-            exit 1
-          fi
+          echo "📦 Instalando OSV Scanner..."
+          OSV_URL=$(curl -s https://api.github.com/repos/google/osv-scanner/releases/latest \
+            | jq -r '.assets[] | select(.name | contains("linux_amd64")) | .browser_download_url' \
+            | head -n1)
+
+          curl -L "$OSV_URL" -o osv-scanner
+          chmod +x osv-scanner
           sudo mv osv-scanner /usr/local/bin/
-          
-          # Gitleaks
-          LEAKS_URL=$(curl -sfL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | jq -r '.assets[] | select(.name | contains("linux_x64.tar.gz")) | .browser_download_url' | head -n 1)
-          curl -fL "$LEAKS_URL" -o gitleaks.tar.gz && tar -xzf gitleaks.tar.gz gitleaks && chmod +x gitleaks
-          
-          if ! file gitleaks | grep -q "ELF"; then
-            echo "❌ ERRO: O download do gitleaks falhou ou retornou um arquivo inválido."
-            exit 1
-          fi
-          sudo mv gitleaks /usr/local/bin/ && rm gitleaks.tar.gz
 
-      - name: Install Semgrep (Native via Pip)
+      - name: Install Gitleaks
         run: |
-          echo "�️ Instalando Semgrep via pip (Ultra-light)..."
+          echo "🔐 Instalando Gitleaks..."
+          URL=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+            | jq -r '.assets[] | select(.name | contains("linux_x64.tar.gz")) | .browser_download_url' \
+            | head -n1)
+
+          curl -L "$URL" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          chmod +x gitleaks
+          sudo mv gitleaks /usr/local/bin/
+          rm gitleaks.tar.gz
+
+      - name: Install Semgrep
+        run: |
           pip install semgrep --quiet
 
-      # =====================================================
-      # 🚀 TURBO PARALLEL SCANS
-      # =====================================================
+# =====================================================
+# 🔐 Checkout DevSecOps config
+# =====================================================
 
-      # =====================================================
-      # 🚀 PARALLEL SCANS (Within the same runner to save time)
-      # =====================================================
-
-      - name: Checkout DevSecOps Config (Security)
+      - name: Checkout DevSecOps Config
         uses: actions/checkout@v4
         with:
           repository: Area-tech-alpha/DevSecOps
@@ -144,117 +124,151 @@ jobs:
           path: devsecops
           fetch-depth: 1
 
-      - name: Run Scanners (Turbo Parallel)
+# =====================================================
+# 🚀 Parallel Scans
+# =====================================================
+
+      - name: Run Security Scanners
         run: |
-          echo "🔐 Rodando Gitleaks (Nativo)..."
-          gitleaks detect --source="." --config="devsecops/security/gitleaks.toml" --redact -v &
-          
-          echo "📦 Rodando OSV Scanner (Nativo)..."
-          echo '{"results":[]}' > osv-results.json
-          # Usamos um arquivo temporário para evitar corrupção
-          osv-scanner scan --config="devsecops/security/osv-scanner.toml" --recursive --format json --skip-git . > osv-results.tmp.json 2>/dev/null || true &
-          
-          echo "🛡️ Rodando Semgrep (Nativo)..."
-          SEMGREP_RULES="${{ steps.detect.outputs.react == 'true' && 'p/security-audit,p/react' || 'p/security-audit' }}"
-          semgrep ci --config="$SEMGREP_RULES" --quiet &
-          
+          echo "🔐 Rodando Gitleaks..."
+          gitleaks detect \
+            --source="." \
+            --config="devsecops/security/gitleaks.toml" \
+            --redact -v &
+
+          echo "📦 Rodando OSV Scanner..."
+          osv-scanner scan \
+            --config="devsecops/security/osv-scanner.toml" \
+            --recursive \
+            --format json \
+            --skip-git . > osv-results.json 2>/dev/null &
+
+          echo "🛡️ Rodando Semgrep..."
+          if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
+            semgrep ci --config="p/security-audit,p/react" --quiet &
+          else
+            semgrep ci --config="p/security-audit" --quiet &
+          fi
+
           wait
-          [ -f osv-results.tmp.json ] && mv osv-results.tmp.json osv-results.json || echo '{"results":[]}' > osv-results.json
-          echo "✅ Scanners finalizados."
+          echo "✅ Scanners finalizados"
 
-      # =====================================================
-      # 🛡️ ANALYSIS & SECURITY GATE
-      # =====================================================
+# =====================================================
+# 💡 OSV remediation advice
+# =====================================================
 
-      # Semgrep foi movido para o bloco paralelo acima para economizar tempo.
-
-      - name: OSV Scanner — Remediation Advice (Conditional)
+      - name: OSV Fix Suggestions
         run: |
-          # Verificamos se há vulnerabilidades antes de rodar o pesado 'osv-scanner fix'
-          VULNS=$(jq '[.results[]?.packages[]?.vulnerabilities[]?] | length' osv-results.json 2>/dev/null || echo 0)
-          if [ "$VULNS" -eq 0 ]; then
-            echo "✅ Tudo limpo. Pulando etapa de remediação para economizar tempo."
+          VULNS=$(jq '[.results[]?.packages[]?.vulnerabilities[]?] | length' osv-results.json 2>/dev/null)
+          VULNS=${VULNS:-0}
+
+          if (( VULNS == 0 )); then
+            echo "✅ Nenhuma vulnerabilidade encontrada."
             exit 0
           fi
 
-          echo "💡 Calculando melhores versões para atualização..."
-          find . -name "package-lock.json" -o -name "yarn.lock" -o -name "pnpm-lock.yaml" -o -name "go.sum" -o -name "Pipfile.lock" -o -name "poetry.lock" | while read -r lockfile; do
+          echo "💡 Calculando possíveis upgrades..."
+
+          find . -name "package-lock.json" \
+                 -o -name "yarn.lock" \
+                 -o -name "pnpm-lock.yaml" \
+                 -o -name "go.sum" \
+                 -o -name "Pipfile.lock" \
+                 -o -name "poetry.lock" | while read lockfile; do
+
             DIR=$(dirname "$lockfile")
             BASE=$(basename "$lockfile")
             MANIFEST=""
+
             case "$BASE" in
-              "package-lock.json"|"yarn.lock"|"pnpm-lock.yaml") MANIFEST="$DIR/package.json" ;;
-              "go.sum") MANIFEST="$DIR/go.mod" ;;
-              "Pipfile.lock") MANIFEST="$DIR/Pipfile" ;;
-              "poetry.lock") MANIFEST="$DIR/pyproject.toml" ;;
+              package-lock.json|yarn.lock|pnpm-lock.yaml)
+                MANIFEST="$DIR/package.json"
+                ;;
+              go.sum)
+                MANIFEST="$DIR/go.mod"
+                ;;
+              Pipfile.lock)
+                MANIFEST="$DIR/Pipfile"
+                ;;
+              poetry.lock)
+                MANIFEST="$DIR/pyproject.toml"
+                ;;
             esac
-            REL_LOCK=${lockfile#./}
-            if [ -n "$MANIFEST" ] && [ -f "$MANIFEST" ]; then
-              REL_MANIFEST=${MANIFEST#./}
-              osv-scanner fix --strategy=relax --upgrade-config=major --data-source=native -M "$REL_MANIFEST" -L "$REL_LOCK" || true
+
+            if [ -f "$MANIFEST" ]; then
+              osv-scanner fix \
+                --strategy=relax \
+                --upgrade-config=major \
+                --data-source=native \
+                -M "$MANIFEST" \
+                -L "$lockfile" || true
             else
-              osv-scanner fix --strategy=relax --upgrade-config=major --data-source=native -L "$REL_LOCK" || true
+              osv-scanner fix \
+                --strategy=relax \
+                --upgrade-config=major \
+                --data-source=native \
+                -L "$lockfile" || true
             fi
+
           done
 
-      - name: Enforce Security Gate (Fail on High/Critical)
+# =====================================================
+# 🚨 Security Gate
+# =====================================================
+
+      - name: Enforce Security Gate
         run: |
-          echo "⚖️ Verificando severidade das vulnerabilidades..."
-          if [ ! -f osv-results.json ] || [ ! -s osv-results.json ]; then
-            echo "✅ Nenhum resultado de scan encontrado."
-            exit 0
-          fi
+          echo "⚖️ Verificando severidade..."
 
-          echo "--- RESUMO DE VULNERABILIDADES (HIGH/CRITICAL) ---"
-          # Filtro JQ ultra-robusto: trata campos nulos e ausentes em qualquer nível
-          jq -r '
-            .results[]? | .packages[]? as $pkg | $pkg.vulnerabilities[]? 
+          HIGH_VULNS=$(jq '
+            [.results[]?
+            | .packages[]?
+            | .vulnerabilities[]?
             | select(
-                ((.database_specific | .cvssScore) // 0 >= 7) or 
-                ((.database_specific | .severity) // "" | (contains("HIGH") or contains("CRITICAL")))
+                ((.database_specific.cvssScore // 0) >= 7)
+                or
+                ((.database_specific.severity // "") | test("HIGH|CRITICAL"))
               )
-            | "🚩 ID: \(.id) | Pacote: \($pkg.package.name) | Score: \((.database_specific | .cvssScore) // "N/A")"
-          ' osv-results.json 2>/dev/null || echo "ℹ️ Nenhuma vulnerabilidade crítica formatável nos logs."
-          echo "--------------------------------------------------"
+            ] | length
+          ' osv-results.json 2>/dev/null)
 
-          HIGH_VULNS=$(jq '[.results[]? | .packages[]?.vulnerabilities[]? | select(((.database_specific | .cvssScore) // 0 >= 7) or ((.database_specific | .severity) // "" | (contains("HIGH") or contains("CRITICAL"))))] | length' osv-results.json 2>/dev/null || echo 0)
           HIGH_VULNS=${HIGH_VULNS:-0}
-          
-          if [[ ! "$HIGH_VULNS" =~ ^[0-9]+$ ]]; then HIGH_VULNS=0; fi
-          
-          if [ "$HIGH_VULNS" -gt 0 ]; then
-            echo "❌ ERRO: Foram encontradas $HIGH_VULNS vulnerabilidades HIGH/CRITICAL!"
+
+          if (( HIGH_VULNS > 0 )); then
+            echo "❌ $HIGH_VULNS vulnerabilidades HIGH/CRITICAL detectadas"
             exit 1
-          else
-            echo "✅ Nenhuma vulnerabilidade de alto risco detectada."
           fi
 
-      # =====================================================
-      # 📦 LIGHTWEIGHT AUDITS (No install needed)
-      # =====================================================
+          echo "✅ Nenhuma vulnerabilidade crítica."
 
-      - name: NPM Audit (Lightweight)
+# =====================================================
+# 📦 Lightweight Audits
+# =====================================================
+
+      - name: NPM Audit
         if: steps.detect.outputs.node == 'true' && hashFiles('**/package-lock.json') != ''
         run: npm audit --audit-level=high || true
 
-      - name: pip-audit (Lightweight)
+      - name: pip audit
         if: steps.detect.outputs.python == 'true'
         run: |
           pip install pip-audit
-          if [ -f requirements.txt ]; then pip-audit -r requirements.txt || true; fi
+          if [ -f requirements.txt ]; then
+            pip-audit -r requirements.txt || true
+          fi
 
-      # =====================================================
-      # FINAL SUMMARY
-      # =====================================================
+# =====================================================
+# 📊 Summary
+# =====================================================
 
-      - name: Security Scan Summary
+      - name: Security Summary
         if: always()
         run: |
-          echo "============================================"
-          echo "📊 Security Scan Summary (Optimized)"
-          echo "============================================"
-          echo "  🔐 Gitleaks      → Executado"
-          echo "  🛡️ Semgrep       → Executado"
-          echo "  📦 OSV Scanner   → Executado (Nativo)"
-          echo "  📦 Audits        → Executado (Lightweight)"
-          echo "============================================"
+          echo "======================================"
+          echo "🔐 Alpha Security Scan Completed"
+          echo "======================================"
+          echo "Gitleaks  ✔"
+          echo "Semgrep   ✔"
+          echo "OSV Scan  ✔"
+          echo "Audits    ✔"
+          echo "======================================"
