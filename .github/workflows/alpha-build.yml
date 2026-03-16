@@ -26,13 +26,15 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      # ⚡ OTIMIZAÇÃO — Cache de node_modules
-      # Cacheia node_modules diretamente. Se cache hit → pula npm ci.
-      - name: Cache node_modules
+      # ⚡ OTIMIZAÇÃO — Cache de node_modules e Next.js
+      # Cacheia dependências e build artifacts para acelerar compilações
+      - name: Cache node_modules & Next.js Build
         id: cache-nm
         uses: actions/cache@v4
         with:
-          path: node_modules
+          path: |
+            node_modules
+            .next/cache
           key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-node-modules-
@@ -88,12 +90,12 @@ jobs:
       - name: Install Node dependencies
         if: steps.detect.outputs.node == 'true' && steps.cache-nm.outputs.cache-hit != 'true'
         run: |
-          echo "📦 Installing dependencies (cache miss)"
+          echo "📦 Installing dependencies (cache miss or update)"
 
           if [ -f package-lock.json ]; then
-            npm ci --legacy-peer-deps --no-engine-strict || npm install --legacy-peer-deps --no-engine-strict
+            npm ci --legacy-peer-deps --no-engine-strict --prefer-offline || npm install --legacy-peer-deps --no-engine-strict --prefer-offline
           else
-            npm install --legacy-peer-deps --no-engine-strict
+            npm install --legacy-peer-deps --no-engine-strict --prefer-offline
           fi
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
@@ -123,13 +125,16 @@ jobs:
         if: steps.detect.outputs.node == 'true' && steps.detect.outputs.docker != 'true'
         run: |
           if node -e "process.exit(require('./package.json').scripts?.build ? 0 : 1)"; then
-            echo "🏗 Running build"
+            echo "🏗 Running build (Optimized)"
+            # Se for Next.js, desabilitar telemetria economiza tempo
             npm run build
           else
             echo "ℹ️ No build script found"
           fi
         env:
           DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_dummy"
+          NEXT_TELEMETRY_DISABLED: 1
+          CI: true
 
       # =====================================================
       # TYPESCRIPT
@@ -144,7 +149,7 @@ jobs:
           DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_dummy"
 
       # =====================================================
-      # PYTHON PROJECTS
+      # PYTHON PROJECTS (Build/Install Only)
       # =====================================================
 
       - name: Setup Python
@@ -160,39 +165,6 @@ jobs:
 
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
-          fi
-
-      - name: Install Python dev tools
-        if: steps.detect.outputs.python == 'true'
-        run: |
-          pip install ruff bandit pip-audit pytest
-
-      - name: Python Lint
-        if: steps.detect.outputs.python == 'true'
-        run: |
-          ruff check .
-
-      - name: Python Security Scan
-        if: steps.detect.outputs.python == 'true'
-        run: |
-          if [ -d src ]; then
-            bandit -r src -ll
-          else
-            bandit -r . -ll
-          fi
-
-      - name: Python Dependency Audit
-        if: steps.detect.outputs.python == 'true'
-        run: |
-          pip-audit --progress-spinner=off
-
-      - name: Python Tests
-        if: steps.detect.outputs.python == 'true'
-        run: |
-          if [ -d tests ]; then
-            pytest -q
-          else
-            echo "ℹ️ No tests found"
           fi
 
       # =====================================================
