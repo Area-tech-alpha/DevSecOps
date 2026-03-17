@@ -87,8 +87,9 @@ jobs:
       - name: Install OSV Scanner
         run: |
           echo "📦 Instalando OSV Scanner..."
-          OSV_URL=$(curl -s https://api.github.com/repos/google/osv-scanner/releases/latest \
-            | jq -r '.assets[] | select(.name | contains("linux_amd64")) | .browser_download_url' \
+          # Evasão de Rate Limit inserindo o Header de Autorização
+          OSV_URL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/google/osv-scanner/releases/latest \
+            | jq -r '.assets[] | select(.name | contains("linux_amd64") and (contains("exe") | not) and (contains("SHA256") | not)) | .browser_download_url' \
             | head -n1)
 
           curl -L "$OSV_URL" -o osv-scanner
@@ -98,7 +99,7 @@ jobs:
       - name: Install Gitleaks
         run: |
           echo "🔐 Instalando Gitleaks..."
-          URL=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+          URL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
             | jq -r '.assets[] | select(.name | contains("linux_x64.tar.gz")) | .browser_download_url' \
             | head -n1)
 
