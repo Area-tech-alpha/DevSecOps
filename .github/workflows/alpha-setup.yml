@@ -1,0 +1,68 @@
+name: Alpha Setup
+
+on:
+  workflow_call:
+    outputs:
+      node:
+        description: "Se o projeto usa Node.js"
+        value: ${{ jobs.setup.outputs.node }}
+      python:
+        description: "Se o projeto usa Python"
+        value: ${{ jobs.setup.outputs.python }}
+      docker:
+        description: "Se o projeto tem Dockerfile"
+        value: ${{ jobs.setup.outputs.docker }}
+      typescript:
+        description: "Se o projeto usa TypeScript"
+        value: ${{ jobs.setup.outputs.typescript }}
+      react:
+        description: "Se o projeto usa React"
+        value: ${{ jobs.setup.outputs.react }}
+      go:
+        description: "Se o projeto usa Go"
+        value: ${{ jobs.setup.outputs.go }}
+
+jobs:
+  setup:
+    name: "Initialize and Detect Project Context"
+    runs-on: ubuntu-latest
+    outputs:
+      node: ${{ steps.detect.outputs.node }}
+      python: ${{ steps.detect.outputs.python }}
+      docker: ${{ steps.detect.outputs.docker }}
+      typescript: ${{ steps.detect.outputs.typescript }}
+      react: ${{ steps.detect.outputs.react }}
+      go: ${{ steps.detect.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect project type
+        id: detect
+        run: |
+          echo "🔍 Detectando contexto do repositório..."
+          
+          if [ -f package.json ]; then
+            echo "node=true" >> $GITHUB_OUTPUT
+            if node -e "
+              const pkg = require('./package.json');
+              const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+              process.exit(deps['react'] ? 0 : 1);
+            " 2>/dev/null; then
+              echo "react=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+          if [ -f requirements.txt ] || [ -f pyproject.toml ] || [ -f setup.py ]; then
+            echo "python=true" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -f Dockerfile ]; then
+            echo "docker=true" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ -f tsconfig.json ]; then
+            echo "typescript=true" >> $GITHUB_OUTPUT
+          fi
+          
+          if [ -f go.mod ]; then
+            echo "go=true" >> $GITHUB_OUTPUT
+          fi

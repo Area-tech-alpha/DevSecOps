@@ -133,6 +133,8 @@ jobs:
           fi
         env:
           DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_dummy"
+          NEXT_PUBLIC_SUPABASE_URL: "https://ci-dummy.supabase.co"
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy.dummy"
           NEXT_TELEMETRY_DISABLED: 1
           CI: true
 
