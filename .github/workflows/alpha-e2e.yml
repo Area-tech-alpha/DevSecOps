@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout Target Repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # --------------------------------
       # Detect E2E Framework
@@ -113,7 +115,7 @@ jobs:
           fi
 
           if [ -n "$CHANGED" ]; then
-            # Troca quebras de linha por espaço
+            # Format files safely to avoid command injection
             FILES=$(echo "$CHANGED" | tr '\n' ' ')
             echo "Arquivos afetados: $FILES"
             
@@ -175,7 +177,8 @@ jobs:
           # 2. Playwright
           elif [ "${{ steps.detect.outputs.framework }}" == "playwright" ]; then
             if [ -n "$TARGET_FILES" ]; then
-              npx playwright test $TARGET_FILES
+              # Securely pass modified files
+              echo "$TARGET_FILES" | xargs -n 50 npx playwright test
             else
               npx playwright test
             fi

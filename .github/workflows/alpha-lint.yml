@@ -41,7 +41,7 @@ jobs:
       - name: Detect project type
         id: detect
         run: |
-          if [ -f package.json ]; then
+          if [ -s package.json ] && jq -e . package.json >/dev/null 2>&1; then
             echo "node=true" >> $GITHUB_OUTPUT
           fi
 

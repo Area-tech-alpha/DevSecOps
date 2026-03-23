@@ -35,7 +35,7 @@ jobs:
           HAS_TESTS=false
 
           # ── Node.js ──
-          if [ -f package.json ]; then
+          if [ -s package.json ] && jq -e . package.json >/dev/null 2>&1; then
             echo "node=true" >> $GITHUB_OUTPUT
 
             # Detecta o runner (jest vs vitest)

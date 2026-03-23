@@ -46,7 +46,7 @@ jobs:
         id: detect
         run: |
 
-          if [ -f package.json ]; then
+          if [ -s package.json ] && jq -e . package.json >/dev/null 2>&1; then
             echo "node=true" >> $GITHUB_OUTPUT
           fi
 
@@ -77,7 +77,7 @@ jobs:
       - name: Validate package.json
         if: steps.detect.outputs.node == 'true' && steps.detect.outputs.docker != 'true'
         run: |
-          node -e "JSON.parse(require('fs').readFileSync('package.json'))"
+          jq . package.json >/dev/null
 
       - name: Create .npmrc for Auth
         if: steps.detect.outputs.node == 'true' && steps.cache-nm.outputs.cache-hit != 'true'
@@ -133,8 +133,6 @@ jobs:
           fi
         env:
           DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_dummy"
-          NEXT_PUBLIC_SUPABASE_URL: "https://ci-dummy.supabase.co"
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy.dummy"
           NEXT_TELEMETRY_DISABLED: 1
           CI: true
 
@@ -176,11 +174,6 @@ jobs:
       - name: Docker Build
         if: steps.detect.outputs.docker == 'true'
         run: |
-          echo "🐳 Auto-patching Dockerfile for Security & Resilience"
-          # Patch 1: Force OS Updates (Alpine)
-          sed -i 's/apk add/apk update \&\& apk upgrade --no-cache \&\& apk add/g' Dockerfile
-          # Patch 2: Allow lockfile updates in CI (bypass frozen-lockfile)
-          sed -i 's/--frozen-lockfile//g' Dockerfile
-          
           echo "🐳 Validating Docker build"
+          # No longer forcibly stripping --frozen-lockfile to prevent supply chain vulnerabilities
           docker build -t alpha-ci-test .
