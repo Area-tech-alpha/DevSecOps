@@ -142,7 +142,16 @@ jobs:
 # =====================================================
 
       - name: Run Security Scanners
+        env:
+          PATH: /usr/local/bin:${{ github.workspace }}/.local/bin:/home/runner/.local/bin:/usr/bin:/bin
         run: |
+          # Debug: verificar binários disponíveis
+          echo "🔍 Verificando binários..."
+          echo "  gitleaks:    $(which gitleaks 2>/dev/null || echo 'NOT FOUND')"
+          echo "  osv-scanner: $(which osv-scanner 2>/dev/null || echo 'NOT FOUND')"
+          echo "  semgrep:     $(which semgrep 2>/dev/null || echo 'NOT FOUND')"
+          SEMGREP_BIN=$(which semgrep 2>/dev/null || echo "$HOME/.local/bin/semgrep")
+
           echo "🔐 Rodando Gitleaks..."
           /usr/local/bin/gitleaks detect \
             --source="." \
@@ -160,9 +169,9 @@ jobs:
 
           echo "🛡️ Rodando Semgrep..."
           if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
-            $HOME/.local/bin/semgrep ci --config="p/security-audit,p/react" --quiet &
+            "$SEMGREP_BIN" scan --error --config="p/security-audit" --config="p/react" --quiet . &
           else
-            $HOME/.local/bin/semgrep ci --config="p/security-audit" --quiet &
+            "$SEMGREP_BIN" scan --error --config="p/security-audit" --quiet . &
           fi
           PID_SEM=$!
 
@@ -181,7 +190,7 @@ jobs:
           fi
 
           if [ $EXIT_SEM -ne 0 ]; then
-            echo "❌ Semgrep falhou ou encontrou vulnerabilidades ! (Exit Code: $EXIT_SEM)"
+            echo "❌ Semgrep falhou ou encontrou vulnerabilidades! (Exit Code: $EXIT_SEM)"
             exit 1
           fi
 
