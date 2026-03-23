@@ -144,14 +144,14 @@ jobs:
       - name: Run Security Scanners
         run: |
           echo "🔐 Rodando Gitleaks..."
-          gitleaks detect \
+          /usr/local/bin/gitleaks detect \
             --source="." \
             --config="devsecops/security/gitleaks.toml" \
             --redact -v &
           PID_GIT=$!
 
           echo "📦 Rodando OSV Scanner..."
-          osv-scanner scan \
+          /usr/local/bin/osv-scanner scan \
             --config="devsecops/security/osv-scanner.toml" \
             --recursive \
             --format json \
@@ -160,20 +160,18 @@ jobs:
 
           echo "🛡️ Rodando Semgrep..."
           if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
-            semgrep ci --config="p/security-audit,p/react" --quiet &
+            $HOME/.local/bin/semgrep ci --config="p/security-audit,p/react" --quiet &
           else
-            semgrep ci --config="p/security-audit" --quiet &
+            $HOME/.local/bin/semgrep ci --config="p/security-audit" --quiet &
           fi
           PID_SEM=$!
 
-          wait $PID_GIT
-          EXIT_GIT=$?
-
-          wait $PID_OSV
-          EXIT_OSV=$?
-
-          wait $PID_SEM
-          EXIT_SEM=$?
+          # Desativa o 'set -e' temporariamente pois o 'wait' de uma job que falhou abortaria o script no ato
+          set +e
+          wait $PID_GIT; EXIT_GIT=$?
+          wait $PID_OSV; EXIT_OSV=$?
+          wait $PID_SEM; EXIT_SEM=$?
+          set -e
 
           echo "✅ Background tasks finalizadas. Avaliando resultados diretos..."
 
@@ -183,13 +181,16 @@ jobs:
           fi
 
           if [ $EXIT_SEM -ne 0 ]; then
-            echo "❌ Semgrep encontrou vulnerabilidades estruturais no código! (Exit Code: $EXIT_SEM)"
+            echo "❌ Semgrep falhou ou encontrou vulnerabilidades ! (Exit Code: $EXIT_SEM)"
             exit 1
           fi
 
           # OSV errors são silenciados aqui pois são tratados nos Steps sequentes
           if [ $EXIT_OSV -ne 0 ]; then
-            echo "⚠️ OSV Scanner detectou dependências vulneráveis (Avaliando Threshold a seguir...)"
+            echo "⚠️ OSV Scanner abortou ou encontrou itens vulneráveis."
+            echo "=== Erros Crús ==="
+            cat osv-errors.log || true
+            echo "=================="
           fi
 
 # =====================================================
