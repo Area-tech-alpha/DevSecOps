@@ -123,6 +123,7 @@ jobs:
         run: |
           # Usando pipx para evitar o erro "Externally Managed Environment" (PEP-668) em Ubuntu-latest
           pipx install semgrep --quiet
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
 # =====================================================
 # 🔐 Checkout DevSecOps config
@@ -319,5 +320,5 @@ jobs:
           echo "Gitleaks  ✔"
           echo "Semgrep   ✔"
           echo "OSV Scan  ✔"
-          echo "Audits    ✔"
+          echo "Audits    "
           echo "======================================"
