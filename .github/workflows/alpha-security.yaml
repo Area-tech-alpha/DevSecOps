@@ -121,9 +121,8 @@ jobs:
 
       - name: Install Semgrep
         run: |
-          # Usando pipx para evitar o erro "Externally Managed Environment" (PEP-668) em Ubuntu-latest
-          pipx install semgrep --quiet
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          # CI runner é efêmero — --break-system-packages é seguro aqui
+          pip install semgrep --quiet --break-system-packages
 
 # =====================================================
 # 🔐 Checkout DevSecOps config
@@ -142,15 +141,12 @@ jobs:
 # =====================================================
 
       - name: Run Security Scanners
-        env:
-          PATH: /usr/local/bin:${{ github.workspace }}/.local/bin:/home/runner/.local/bin:/usr/bin:/bin
         run: |
           # Debug: verificar binários disponíveis
           echo "🔍 Verificando binários..."
           echo "  gitleaks:    $(which gitleaks 2>/dev/null || echo 'NOT FOUND')"
           echo "  osv-scanner: $(which osv-scanner 2>/dev/null || echo 'NOT FOUND')"
           echo "  semgrep:     $(which semgrep 2>/dev/null || echo 'NOT FOUND')"
-          SEMGREP_BIN=$(which semgrep 2>/dev/null || echo "$HOME/.local/bin/semgrep")
 
           echo "🔐 Rodando Gitleaks..."
           /usr/local/bin/gitleaks detect \
@@ -169,9 +165,9 @@ jobs:
 
           echo "🛡️ Rodando Semgrep..."
           if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
-            "$SEMGREP_BIN" scan --error --config="p/security-audit" --config="p/react" --quiet . &
+            semgrep scan --error --config="p/security-audit" --config="p/react" --quiet . &
           else
-            "$SEMGREP_BIN" scan --error --config="p/security-audit" --quiet . &
+            semgrep scan --error --config="p/security-audit" --quiet . &
           fi
           PID_SEM=$!
 
@@ -312,7 +308,7 @@ jobs:
       - name: pip audit
         if: steps.detect.outputs.python == 'true'
         run: |
-          pipx install pip-audit
+          pip install pip-audit --quiet --break-system-packages
           if [ -f requirements.txt ]; then
             pip-audit -r requirements.txt || true
           fi
