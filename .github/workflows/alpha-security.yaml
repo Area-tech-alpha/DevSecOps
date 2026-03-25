@@ -23,6 +23,13 @@ jobs:
           fetch-depth: 0
 
 # =====================================================
+# 🧰 Ensure dependencies
+# =====================================================
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+# =====================================================
 # 🔎 Detect project type
 # =====================================================
 
@@ -35,11 +42,7 @@ jobs:
             echo "node=true" >> $GITHUB_OUTPUT
             echo "✅ Node detectado"
 
-            if node -e "
-              const pkg = require('./package.json');
-              const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-              process.exit(deps['react'] ? 0 : 1);
-            "; then
+            if jq -e '.dependencies.react or .devDependencies.react' package.json >/dev/null 2>&1; then
               echo "react=true" >> $GITHUB_OUTPUT
               echo "⚛️ React detectado"
             fi
@@ -87,13 +90,12 @@ jobs:
       - name: Install OSV Scanner
         run: |
           echo "📦 Instalando OSV Scanner..."
-          # Evasão de Rate Limit inserindo o Header de Autorização
           OSV_URL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/google/osv-scanner/releases/latest \
             | jq -r '.assets[] | select(.name | contains("linux_amd64") and (contains("exe") | not) and (contains("SHA256") | not)) | .browser_download_url' \
             | head -n1)
 
           if [ -z "$OSV_URL" ] || [ "$OSV_URL" == "null" ]; then
-            echo "❌ Falha crítica: não foi possível resolver a URL do OSV Scanner (Rate Limit ou Mudança de API)"
+            echo "❌ Falha ao obter OSV Scanner"
             exit 1
           fi
 
@@ -109,7 +111,7 @@ jobs:
             | head -n1)
 
           if [ -z "$URL" ] || [ "$URL" == "null" ]; then
-            echo "❌ Falha crítica: não foi possível resolver a URL do Gitleaks"
+            echo "❌ Falha ao obter Gitleaks"
             exit 1
           fi
 
@@ -120,9 +122,7 @@ jobs:
           rm gitleaks.tar.gz
 
       - name: Install Semgrep
-        run: |
-          # pip direto — CI runner é efêmero, --break-system-packages contorna PEP-668 sem risco
-          pip install semgrep --quiet --break-system-packages
+        run: pip install semgrep --quiet --break-system-packages
 
 # =====================================================
 # 🔐 Checkout DevSecOps config
@@ -159,34 +159,32 @@ jobs:
 
           echo "🛡️ Rodando Semgrep..."
           if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
-            semgrep ci --config="p/security-audit,p/react" --quiet &
+            semgrep scan --config="p/security-audit,p/react" --quiet &
           else
-            semgrep ci --config="p/security-audit" --quiet &
+            semgrep scan --config="p/security-audit" --quiet &
           fi
           PID_SEM=$!
 
-          # set +e evita que o bash aborte o script inteiro quando 'wait' retorna exit != 0
           set +e
           wait $PID_GIT; EXIT_GIT=$?
           wait $PID_OSV; EXIT_OSV=$?
           wait $PID_SEM; EXIT_SEM=$?
           set -e
 
-          echo "✅ Background tasks finalizadas. Avaliando resultados diretos..."
+          echo "✅ Background tasks finalizadas"
 
           if [ $EXIT_GIT -ne 0 ]; then
-            echo "❌ Gitleaks encontrou segredos vazados no código! (Exit Code: $EXIT_GIT)"
+            echo "❌ Segredos detectados (Gitleaks)"
             exit 1
           fi
 
           if [ $EXIT_SEM -ne 0 ]; then
-            echo "❌ Semgrep encontrou vulnerabilidades estruturais no código! (Exit Code: $EXIT_SEM)"
+            echo "❌ Vulnerabilidades estruturais detectadas (Semgrep)"
             exit 1
           fi
 
-          # OSV errors são silenciados aqui pois são tratados nos Steps seguintes
           if [ $EXIT_OSV -ne 0 ]; then
-            echo "⚠️ OSV Scanner detectou dependências vulneráveis (Avaliando Threshold a seguir...)"
+            echo "⚠️ OSV retornou erro ou vulnerabilidades — será avaliado no gate"
           fi
 
 # =====================================================
@@ -195,26 +193,37 @@ jobs:
 
       - name: OSV Fix Suggestions
         run: |
-          # Se o arquivo não existe ou está vazio, significa que o scan não produziu output (0 vulns)
+          if [ ! -f osv-results.json ]; then
+            echo "❌ OSV não gerou output"
+            exit 1
+          fi
+
           if [ ! -s osv-results.json ]; then
-            echo "✅ osv-results.json vazio ou ausente — nenhuma vulnerabilidade encontrada pelo OSV."
+            echo "✅ Nenhuma vulnerabilidade encontrada"
             exit 0
           fi
 
           if ! jq -e . osv-results.json >/dev/null 2>&1; then
-            echo "❌ Failed to parse osv-results.json."
+            echo "❌ JSON inválido"
             exit 1
           fi
 
-          VULNS=$(jq '[.results[]?.packages[]?.vulnerabilities[]?] | length' osv-results.json 2>/dev/null)
-          VULNS=${VULNS:-0}
+          VULNS=$(jq '
+            [
+              .results[]?
+              | (
+                  .packages[]?.vulnerabilities[]?,
+                  .vulnerabilities[]?
+                )
+            ] | length
+          ' osv-results.json)
 
           if (( VULNS == 0 )); then
-            echo "✅ Nenhuma vulnerabilidade encontrada."
+            echo "✅ Nenhuma vulnerabilidade encontrada"
             exit 0
           fi
 
-          echo "💡 Calculando possíveis upgrades..."
+          echo "💡 Tentando correções automáticas..."
 
           find . -name "package-lock.json" \
                  -o -name "yarn.lock" \
@@ -224,79 +233,80 @@ jobs:
                  -o -name "poetry.lock" | while read lockfile; do
 
             DIR=$(dirname "$lockfile")
-            BASE=$(basename "$lockfile")
-            MANIFEST=""
 
-            case "$BASE" in
-              package-lock.json|yarn.lock|pnpm-lock.yaml)
-                MANIFEST="$DIR/package.json"
-                ;;
-              go.sum)
-                MANIFEST="$DIR/go.mod"
-                ;;
-              Pipfile.lock)
-                MANIFEST="$DIR/Pipfile"
-                ;;
-              poetry.lock)
-                MANIFEST="$DIR/pyproject.toml"
-                ;;
-            esac
-
-            if [ -f "$MANIFEST" ]; then
-              osv-scanner fix \
-                --strategy=relax \
-                --upgrade-config=major \
-                --data-source=native \
-                -M "$MANIFEST" \
-                -L "$lockfile" || echo "⚠️ osv-scanner fix encountered an issue on $lockfile"
-            else
-              osv-scanner fix \
-                --strategy=relax \
-                --upgrade-config=major \
-                --data-source=native \
-                -L "$lockfile" || echo "⚠️ osv-scanner fix encountered an issue on $lockfile"
-            fi
+            osv-scanner fix \
+              --strategy=relax \
+              --upgrade-config=major \
+              --data-source=native \
+              -L "$lockfile" || true
 
           done
 
 # =====================================================
-# 🚨 Security Gate
+# 🚨 Security Gate (ROBUSTO)
 # =====================================================
 
       - name: Enforce Security Gate
         run: |
           echo "⚖️ Verificando severidade..."
 
+          if [ ! -f osv-results.json ]; then
+            echo "❌ OSV não gerou output — falha"
+            exit 1
+          fi
+
           if [ ! -s osv-results.json ]; then
-            echo "✅ Nenhum resultado do OSV — sem vulnerabilidades."
+            echo "✅ Nenhuma vulnerabilidade"
             exit 0
           fi
-          
+
           if ! jq -e . osv-results.json >/dev/null 2>&1; then
-            echo "❌ Invalid JSON format in osv-results.json"
+            echo "❌ JSON inválido"
             exit 1
           fi
 
           HIGH_VULNS=$(jq '
-            [.results[]?
-            | .packages[]?
-            | .vulnerabilities[]?
-            | select(
-                ((.database_specific.cvssScore // 0) >= 7)
-                or
-                ((.database_specific.severity // "") | test("HIGH|CRITICAL"))
-              )
+            [
+              .results[]?
+              | (
+                  .packages[]?.vulnerabilities[]?,
+                  .vulnerabilities[]?
+                )
+              | select(
+                  (.database_specific.cvssScore // 0) >= 7
+                  or
+                  ((.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
+                  or
+                  ((.severity[]?.score | tonumber? // 0) >= 7)
+                )
             ] | length
-          ' osv-results.json 2>/dev/null)
+          ' osv-results.json)
 
-          HIGH_VULNS=${HIGH_VULNS:-0}
+          echo "🔢 HIGH/CRITICAL: $HIGH_VULNS"
 
           if (( HIGH_VULNS > 0 )); then
-            echo "❌ $HIGH_VULNS vulnerabilidades HIGH/CRITICAL detectadas"
+            echo "❌ Vulnerabilidades críticas detectadas"
+
+            jq -r '
+              .results[]?
+              | (
+                  .packages[]?.vulnerabilities[]?,
+                  .vulnerabilities[]?
+                )
+              | select(
+                  (.database_specific.cvssScore // 0) >= 7
+                  or
+                  ((.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
+                  or
+                  ((.severity[]?.score | tonumber? // 0) >= 7)
+                )
+              | "• \(.id // "N/A") - \(.summary // "Sem descrição")"
+            ' osv-results.json
+
             exit 1
           fi
 
-          echo "✅ Nenhuma vulnerabilidade crítica."
+          echo "✅ Nenhuma vulnerabilidade crítica"
 
 # =====================================================
 # 📦 Lightweight Audits
@@ -304,8 +314,7 @@ jobs:
 
       - name: NPM Audit
         if: steps.detect.outputs.node == 'true' && hashFiles('**/package-lock.json') != ''
-        run: |
-          npm audit --audit-level=high || true
+        run: npm audit --audit-level=high || true
 
       - name: pip audit
         if: steps.detect.outputs.python == 'true'
@@ -328,5 +337,6 @@ jobs:
           echo "Gitleaks  ✔"
           echo "Semgrep   ✔"
           echo "OSV Scan  ✔"
-          echo "Audits    "
+          echo "Audits    ✔"
           echo "======================================"
+
