@@ -40,27 +40,22 @@ jobs:
 
           if [ -s package.json ] && jq -e . package.json >/dev/null 2>&1; then
             echo "node=true" >> $GITHUB_OUTPUT
-            echo "✅ Node detectado"
 
             if jq -e '.dependencies.react or .devDependencies.react' package.json >/dev/null 2>&1; then
               echo "react=true" >> $GITHUB_OUTPUT
-              echo "⚛️ React detectado"
             fi
           fi
 
           if [ -f requirements.txt ] || [ -f pyproject.toml ]; then
             echo "python=true" >> $GITHUB_OUTPUT
-            echo "🐍 Python detectado"
           fi
 
           if [ -f Dockerfile ]; then
             echo "docker=true" >> $GITHUB_OUTPUT
-            echo "🐳 Docker detectado"
           fi
 
           if [ -f go.mod ]; then
             echo "go=true" >> $GITHUB_OUTPUT
-            echo "🐹 Go detectado"
           fi
 
 # =====================================================
@@ -72,16 +67,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          registry-url: https://npm.pkg.github.com
-          scope: '@area-tech-alpha'
-
-      - name: Configure npm auth
-        if: steps.detect.outputs.node == 'true'
-        run: |
-          echo "@area-tech-alpha:registry=https://npm.pkg.github.com/" > .npmrc
-          echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> .npmrc
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 # =====================================================
 # ⚡ Install security tools
@@ -89,15 +74,9 @@ jobs:
 
       - name: Install OSV Scanner
         run: |
-          echo "📦 Instalando OSV Scanner..."
-          OSV_URL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/google/osv-scanner/releases/latest \
+          OSV_URL=$(curl -s https://api.github.com/repos/google/osv-scanner/releases/latest \
             | jq -r '.assets[] | select(.name | contains("linux_amd64") and (contains("exe") | not) and (contains("SHA256") | not)) | .browser_download_url' \
             | head -n1)
-
-          if [ -z "$OSV_URL" ] || [ "$OSV_URL" == "null" ]; then
-            echo "❌ Falha ao obter OSV Scanner"
-            exit 1
-          fi
 
           curl -L "$OSV_URL" -o osv-scanner
           chmod +x osv-scanner
@@ -105,15 +84,9 @@ jobs:
 
       - name: Install Gitleaks
         run: |
-          echo "🔐 Instalando Gitleaks..."
-          URL=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+          URL=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
             | jq -r '.assets[] | select(.name | contains("linux_x64.tar.gz")) | .browser_download_url' \
             | head -n1)
-
-          if [ -z "$URL" ] || [ "$URL" == "null" ]; then
-            echo "❌ Falha ao obter Gitleaks"
-            exit 1
-          fi
 
           curl -L "$URL" -o gitleaks.tar.gz
           tar -xzf gitleaks.tar.gz gitleaks
@@ -142,14 +115,9 @@ jobs:
 
       - name: Run Security Scanners
         run: |
-          echo "🔐 Rodando Gitleaks..."
-          gitleaks detect \
-            --source="." \
-            --config="devsecops/security/gitleaks.toml" \
-            --redact -v &
+          gitleaks detect --source="." --config="devsecops/security/gitleaks.toml" --redact -v &
           PID_GIT=$!
 
-          echo "📦 Rodando OSV Scanner..."
           osv-scanner scan \
             --config="devsecops/security/osv-scanner.toml" \
             --recursive \
@@ -157,7 +125,6 @@ jobs:
             --skip-git . > osv-results.json 2>osv-errors.log &
           PID_OSV=$!
 
-          echo "🛡️ Rodando Semgrep..."
           if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
             semgrep scan --config="p/security-audit,p/react" --quiet &
           else
@@ -171,76 +138,61 @@ jobs:
           wait $PID_SEM; EXIT_SEM=$?
           set -e
 
-          echo "✅ Background tasks finalizadas"
+          echo "EXIT_GIT=$EXIT_GIT"
+          echo "EXIT_OSV=$EXIT_OSV"
+          echo "EXIT_SEM=$EXIT_SEM"
 
           if [ $EXIT_GIT -ne 0 ]; then
-            echo "❌ Segredos detectados (Gitleaks)"
+            echo "❌ Segredos detectados"
             exit 1
           fi
 
           if [ $EXIT_SEM -ne 0 ]; then
-            echo "❌ Vulnerabilidades estruturais detectadas (Semgrep)"
+            echo "❌ Vulnerabilidades Semgrep"
             exit 1
           fi
 
+          # NÃO ignorar erro do OSV
           if [ $EXIT_OSV -ne 0 ]; then
-            echo "⚠️ OSV retornou erro ou vulnerabilidades — será avaliado no gate"
+            echo "❌ OSV Scanner falhou"
+            cat osv-errors.log || true
+            exit 1
           fi
 
 # =====================================================
-# 💡 OSV remediation advice
+# 🔍 OSV Validation (ANTI FALHA SILENCIOSA)
 # =====================================================
 
-      - name: OSV Fix Suggestions
+      - name: Validate OSV Results
         run: |
           if [ ! -f osv-results.json ]; then
             echo "❌ OSV não gerou output"
             exit 1
           fi
 
-          if [ ! -s osv-results.json ]; then
-            echo "✅ Nenhuma vulnerabilidade encontrada"
-            exit 0
-          fi
-
           if ! jq -e . osv-results.json >/dev/null 2>&1; then
             echo "❌ JSON inválido"
+            cat osv-results.json || true
             exit 1
           fi
 
-          VULNS=$(jq '
-            [
-              .results[]?
-              | (
-                  .packages[]?.vulnerabilities[]?,
-                  .vulnerabilities[]?
-                )
-            ] | length
-          ' osv-results.json)
+          RESULTS_COUNT=$(jq '.results | length' osv-results.json 2>/dev/null || echo 0)
 
-          if (( VULNS == 0 )); then
-            echo "✅ Nenhuma vulnerabilidade encontrada"
-            exit 0
+          echo "📊 Results count: $RESULTS_COUNT"
+
+          HAS_DEPS=$(find . -name "package.json" -o -name "requirements.txt" -o -name "go.mod" | wc -l)
+
+          echo "📦 Projetos detectados: $HAS_DEPS"
+
+          if (( HAS_DEPS > 0 && RESULTS_COUNT == 0 )); then
+            echo "❌ Dependências existem mas OSV não analisou nada"
+            exit 1
           fi
 
-          echo "💡 Tentando correções automáticas..."
-
-          find . -name "package-lock.json" \
-                 -o -name "yarn.lock" \
-                 -o -name "pnpm-lock.yaml" \
-                 -o -name "go.sum" \
-                 -o -name "Pipfile.lock" \
-                 -o -name "poetry.lock" | while read lockfile; do
-
-            DIR=$(dirname "$lockfile")
-
-            osv-scanner fix \
-              --strategy=relax \
-              --upgrade-config=major \
-              --data-source=native \
-              -L "$lockfile" || true
-
-          done
+          if [ -s osv-errors.log ]; then
+            echo "⚠️ OSV warnings:"
+            cat osv-errors.log
+          fi
 
 # =====================================================
 # 🚨 Security Gate (ROBUSTO)
@@ -248,23 +200,6 @@ jobs:
 
       - name: Enforce Security Gate
         run: |
-          echo "⚖️ Verificando severidade..."
-
-          if [ ! -f osv-results.json ]; then
-            echo "❌ OSV não gerou output — falha"
-            exit 1
-          fi
-
-          if [ ! -s osv-results.json ]; then
-            echo "✅ Nenhuma vulnerabilidade"
-            exit 0
-          fi
-
-          if ! jq -e . osv-results.json >/dev/null 2>&1; then
-            echo "❌ JSON inválido"
-            exit 1
-          fi
-
           HIGH_VULNS=$(jq '
             [
               .results[]?
@@ -309,22 +244,6 @@ jobs:
           echo "✅ Nenhuma vulnerabilidade crítica"
 
 # =====================================================
-# 📦 Lightweight Audits
-# =====================================================
-
-      - name: NPM Audit
-        if: steps.detect.outputs.node == 'true' && hashFiles('**/package-lock.json') != ''
-        run: npm audit --audit-level=high || true
-
-      - name: pip audit
-        if: steps.detect.outputs.python == 'true'
-        run: |
-          pip install pip-audit --quiet --break-system-packages
-          if [ -f requirements.txt ]; then
-            pip-audit -r requirements.txt || true
-          fi
-
-# =====================================================
 # 📊 Summary
 # =====================================================
 
@@ -333,10 +252,5 @@ jobs:
         run: |
           echo "======================================"
           echo "🔐 Alpha Security Scan Completed"
-          echo "======================================"
-          echo "Gitleaks  ✔"
-          echo "Semgrep   ✔"
-          echo "OSV Scan  ✔"
-          echo "Audits    ✔"
           echo "======================================"
 
