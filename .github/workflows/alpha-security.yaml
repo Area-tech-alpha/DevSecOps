@@ -121,8 +121,7 @@ jobs:
           osv-scanner scan \
             --config="devsecops/security/osv-scanner.toml" \
             --recursive \
-            --format json \
-            --skip-git . > osv-results.json 2>osv-errors.log &
+            --format json . > osv-results.json 2>osv-errors.log &
           PID_OSV=$!
 
           if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
