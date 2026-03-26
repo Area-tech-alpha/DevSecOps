@@ -241,17 +241,18 @@ jobs:
             jq -r '
               .results[]?
               | (
-                  .packages[]?.vulnerabilities[]?,
-                  .vulnerabilities[]?
+                  (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version}),
+                  (.vulnerabilities[]? | {vuln: ., name: "Global", ver: "N/A"})
                 )
               | select(
-                  (.database_specific.cvssScore // 0) >= 7
+                  (.vuln.database_specific.cvssScore // 0) >= 7
                   or
-                  ((.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
+                  ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
                   or
-                  ((.severity[]?.score | tonumber? // 0) >= 7)
+                  ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
                 )
-              | "• \(.id // "N/A") - \(.summary // "Sem descrição")"
+              | ([ .vuln.affected[]? | .ranges[]?.events[]?.fixed | select(type=="string") ] | .[0]) as $fixed
+              | "• \(.vuln.id // "N/A") 🎯 Alvo: \(.name // "Desconhecido")@\(.ver // "?")\n  🚨 Ameaça: \(.vuln.summary // "Exploit Desconhecido")\n  💉 Vacina: \(if $fixed != null then "Migre urgente para v\($fixed)+ (Rode: `npm install \(.name)@^\($fixed)` ou `pnpm update \(.name)@>=\($fixed)`)" else "Patch fix exato desconhecido no JSON. Forçe um update do pacote \(.name)." end)\n"
             ' osv-results.json
 
             exit 1
