@@ -114,6 +114,8 @@ jobs:
 # =====================================================
 
       - name: Run Security Scanners
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
         run: |
           echo "🔐 Rodando Gitleaks..."
           gitleaks detect --source="." --config="devsecops/security/gitleaks.toml" --redact -v &
@@ -147,7 +149,7 @@ jobs:
 
           echo "🛡️ Rodando Semgrep..."
           if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
-            semgrep scan --config="p/security-audit,p/react" --quiet &
+            semgrep scan --config="p/security-audit" --config="p/react" --quiet &
           else
             semgrep scan --config="p/security-audit" --quiet &
           fi
