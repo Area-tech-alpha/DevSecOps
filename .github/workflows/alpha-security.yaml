@@ -175,9 +175,8 @@ jobs:
           fi
 
           if [ "$SKIP_OSV" != "true" ] && [ $EXIT_OSV -ne 0 ]; then
-            echo "❌ OSV Scanner falhou"
+            echo "⚠️ OSV Scanner detectou vulnerabilidades ou avisos (Exit: $EXIT_OSV). Delegando a decisão para o Security Gate..."
             cat osv-errors.log || true
-            exit 1
           fi
 
 # =====================================================
