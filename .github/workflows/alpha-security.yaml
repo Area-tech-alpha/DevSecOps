@@ -120,12 +120,12 @@ jobs:
           PID_GIT=$!
 
           echo "🔍 Detectando lockfiles para OSV..."
-          LOCKFILES=$(find . -name "package-lock.json" \
+          LOCKFILES=$(find . -type d \( -name 'node_modules' -o -name 'venv' -o -name '.venv' -o -name '.git' \) -prune -o -type f \( -name "package-lock.json" \
                                 -o -name "yarn.lock" \
                                 -o -name "pnpm-lock.yaml" \
                                 -o -name "go.mod" \
                                 -o -name "requirements.txt" \
-                                -o -name "poetry.lock")
+                                -o -name "poetry.lock" \) -print)
 
           if [ -z "$LOCKFILES" ]; then
             echo "⚠️ Nenhum lockfile encontrado — pulando OSV"
@@ -134,9 +134,14 @@ jobs:
             echo "📦 Rodando OSV Scanner..."
             echo "$LOCKFILES"
 
+            CMD_ARGS=""
+            for LF in $LOCKFILES; do
+              CMD_ARGS="$CMD_ARGS -L $LF"
+            done
+
             osv-scanner scan \
               --format json \
-              $LOCKFILES > osv-results.json 2>osv-errors.log &
+              $CMD_ARGS > osv-results.json 2>osv-errors.log &
             PID_OSV=$!
           fi
 
