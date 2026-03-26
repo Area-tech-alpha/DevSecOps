@@ -252,7 +252,7 @@ jobs:
                   ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
                 )
               | ([ .vuln.affected[]? | .ranges[]?.events[]?.fixed | select(type=="string") ] | .[0]) as $fixed
-              | "• \(.vuln.id // "N/A") 🎯 Alvo: \(.name // "Desconhecido")@\(.ver // "?")\n  🚨 Ameaça: \(.vuln.summary // "Exploit Desconhecido")\n  💉 Vacina: \(if $fixed != null then "Migre urgente para v\($fixed)+ (Rode: `npm install \(.name)@^\($fixed)` ou `pnpm update \(.name)@>=\($fixed)`)" else "Patch fix exato desconhecido no JSON. Forçe um update do pacote \(.name)." end)\n"
+              | "• \(.vuln.id // "N/A") 🎯 Alvo: \(.name // "Desconhecido")@\(.ver // "?")\n  🚨 Ameaça: \(.vuln.summary // "Exploit Desconhecido")\n  💉 Fix: \(if $fixed != null then "Migre urgente para v\($fixed)+ (Rode: `npm install \(.name)@^\($fixed)` ou `pnpm update \(.name)@>=\($fixed)`)" else "Patch fix exato desconhecido no JSON. Forçe um update do pacote \(.name)." end)\n"
             ' osv-results.json
 
             exit 1
