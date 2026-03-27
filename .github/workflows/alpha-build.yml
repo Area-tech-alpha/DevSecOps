@@ -134,6 +134,8 @@ jobs:
         env:
           DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_dummy"
           NEXT_TELEMETRY_DISABLED: 1
+          NEXT_PUBLIC_SUPABASE_URL: "https://dummy.supabase.co"
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "dummy-key"
           CI: true
 
       # =====================================================
