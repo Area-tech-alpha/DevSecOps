@@ -181,8 +181,8 @@ jobs:
       - name: Docker Build
         if: steps.detect.outputs.docker == 'true'
         env:
-          NPM_TOKEN: ${{ secrets.PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           echo "🐳 Validating Docker build"
-          # Pass the NPM_TOKEN build arg, which is needed by the Dockerfile during pnpm install
-          docker build --build-arg NPM_TOKEN="${NPM_TOKEN}" -t alpha-ci-test .
+          # Pass the NODE_AUTH_TOKEN build arg, which is needed by the Dockerfile during pnpm install
+          docker build --build-arg NODE_AUTH_TOKEN="${NODE_AUTH_TOKEN}" -t alpha-ci-test .
