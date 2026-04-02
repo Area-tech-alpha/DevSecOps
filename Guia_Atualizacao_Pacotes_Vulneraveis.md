@@ -15,6 +15,7 @@
 7. [Caso Prático Completo](#7-caso-prático-completo)
 8. [Comandos de Referência Rápida](#8-comandos-de-referência-rápida)
 9. [Quando NÃO Atualizar](#9-quando-não-atualizar)
+10. [Security Gate Híbrido (CI/CD)](#10-security-gate-híbrido-cicd)
 
 ---
 
@@ -385,6 +386,73 @@ Nem toda vulnerabilidade precisa de ação imediata. Avalie:
 
 ---
 
+## 10. Security Gate Híbrido (CI/CD)
+
+O pipeline `alpha-security` utiliza uma estratégia de **duas camadas** para lidar com vulnerabilidades, separando o tratamento entre dependências diretas e transitivas.
+
+### Arquitetura do Gate
+
+```
+┌─────────────────────────────────────────────────┐
+│              OSV Scanner (scan completo)         │
+│         Escaneia TUDO — diretas + transitivas    │
+└─────────────────┬───────────────────────────────┘
+                  │
+        ┌─────────┴─────────┐
+        ▼                   ▼
+ ┌──────────────┐   ┌──────────────────┐
+ │   DIRETAS     │   │   TRANSITIVAS     │
+ │  HIGH/CRIT    │   │   HIGH/CRIT       │
+ │               │   │                   │
+ │  🔴 BLOCK     │   │  🟡 WARNING       │
+ │  Pipeline     │   │  Loga, mas        │
+ │  falha        │   │  não bloqueia     │
+ └──────────────┘   └──────────────────┘
+```
+
+### Como funciona
+
+1. **Extrai dependências diretas** do `package.json` (campos `dependencies` e `devDependencies`)
+2. **Classifica cada vulnerabilidade** encontrada pelo OSV como:
+   - **Direta** — nome do pacote aparece no `package.json` → tratada como responsabilidade do projeto
+   - **Transitiva** — não aparece no `package.json` → responsabilidade do pacote pai
+3. **Aplica o gate**:
+   - Diretas HIGH/CRITICAL → `exit 1` (pipeline falha)
+   - Transitivas HIGH/CRITICAL → log detalhado + link para overrides (pipeline continua)
+
+### Fallback para projetos sem `package.json`
+
+Para projetos Go, Python ou sem `package.json`, **todas** as vulnerabilidades são tratadas como diretas (modo seguro). Isso garante que projetos não-Node mantêm o comportamento de bloqueio completo.
+
+### Por que NÃO ignorar transitivas completamente
+
+| Fator | Risco |
+|-------|-------|
+| Transitivas rodam no mesmo processo | ReDOS, prototype pollution, etc. afetam seu app igual |
+| Supply chain attacks | A maioria (event-stream, ua-parser-js, colors.js) foram em **transitivas** |
+| O bundle final contém tudo | No `npm run build`, não existe separação — tudo é código que roda |
+| Profundidade ≠ Segurança | Uma transitiva nível 5 que parseia input do usuário é mais perigosa que uma direta que gera logs |
+
+### Corrigindo transitivas que aparecem como WARNING
+
+Quando o pipeline mostrar um WARNING para transitiva, use **overrides** no `package.json`:
+
+```json
+{
+  "overrides": {
+    "pacote-transitivo": "^versao-corrigida"
+  }
+}
+```
+
+> Veja a [seção 5](#5-usando-overrides-para-forçar-versões) para detalhes completos sobre overrides.
+
+### Customizando o comportamento
+
+Para **bloquear transitivas também** (modo paranóico), remova a classificação e trate tudo como direta passando um array vazio `[]` no `direct-deps.json`. Isso é o equivalente ao comportamento anterior do gate.
+
+---
+
 ## 📎 Referências
 
 - [npm audit docs](https://docs.npmjs.com/cli/v10/commands/npm-audit)
@@ -392,7 +460,9 @@ Nem toda vulnerabilidade precisa de ação imediata. Avalie:
 - [npm overrides](https://docs.npmjs.com/cli/v10/configuring-npm/package-json#overrides)
 - [pnpm overrides](https://pnpm.io/package_json#pnpmoverrides)
 - [Node.js Security Best Practices](https://nodejs.org/en/learn/getting-started/security-best-practices)
+- [OSV Scanner Config](https://google.github.io/osv-scanner/configuration/)
 
 ---
 
 > **Última atualização:** 2026-04-02
+

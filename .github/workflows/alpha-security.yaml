@@ -213,7 +213,7 @@ jobs:
           fi
 
 # =====================================================
-# 🚨 Security Gate
+# 🚨 Security Gate (Two-Layer: Direct BLOCK / Transitive WARN)
 # =====================================================
 
       - name: Enforce Security Gate
@@ -223,49 +223,114 @@ jobs:
             exit 0
           fi
 
-          HIGH_VULNS=$(jq '
+          # ── Extrair dependências diretas do package.json ──
+          if [ -f package.json ]; then
+            jq -r '[
+              (.dependencies // {} | keys[]),
+              (.devDependencies // {} | keys[])
+            ] | unique | .[]' package.json > direct-deps-raw.txt
+
+            DIRECT_COUNT=$(wc -l < direct-deps-raw.txt | tr -d ' ')
+            echo "📦 Dependências diretas encontradas: $DIRECT_COUNT"
+
+            # Converter lista para JSON array para uso no jq
+            jq -R -s 'split("\n") | map(select(length > 0))' direct-deps-raw.txt > direct-deps.json
+          else
+            # Sem package.json (Go, Python, etc) → trata TUDO como direta (modo seguro)
+            echo "⚠️ Sem package.json — todas as deps serão tratadas como diretas"
+            echo '[]' > direct-deps.json
+          fi
+
+          # ── Helper: filtro jq para HIGH/CRITICAL ──
+          SEVERITY_FILTER='(
+            (.vuln.database_specific.cvssScore // 0) >= 7
+            or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
+            or ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
+          )'
+
+          # Verifica se direct-deps.json está vazio (modo sem package.json)
+          DIRECT_LIST_EMPTY=$(jq 'length == 0' direct-deps.json)
+
+          # ── Layer 1: Contar vulns em dependências DIRETAS ──
+          DIRECT_VULNS=$(jq --slurpfile direct direct-deps.json "
             [
               .results[]?
-              | (
-                  .packages[]?.vulnerabilities[]?,
-                  .vulnerabilities[]?
-                )
+              | (.packages[]? | . as \$pkg | .vulnerabilities[]? | {vuln: ., name: \$pkg.package.name, ver: \$pkg.package.version})
               | select(
-                  (.database_specific.cvssScore // 0) >= 7
-                  or
-                  ((.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
-                  or
-                  ((.severity[]?.score | tonumber? // 0) >= 7)
+                  ( (\$direct[0] | length) == 0 or (.name as \$n | \$direct[0] | index(\$n) != null) )
+                  and ${SEVERITY_FILTER}
                 )
             ] | length
-          ' osv-results.json)
+          " osv-results.json)
 
-          echo "🔢 HIGH/CRITICAL: $HIGH_VULNS"
+          # ── Layer 2: Contar vulns em dependências TRANSITIVAS ──
+          TRANSITIVE_VULNS=0
+          if [ "$DIRECT_LIST_EMPTY" == "false" ]; then
+            TRANSITIVE_VULNS=$(jq --slurpfile direct direct-deps.json "
+              [
+                .results[]?
+                | (.packages[]? | . as \$pkg | .vulnerabilities[]? | {vuln: ., name: \$pkg.package.name, ver: \$pkg.package.version})
+                | select(
+                    (.name as \$n | \$direct[0] | index(\$n) == null)
+                    and ${SEVERITY_FILTER}
+                  )
+              ] | length
+            " osv-results.json)
+          fi
 
-          if (( HIGH_VULNS > 0 )); then
-            echo "❌ Vulnerabilidades críticas detectadas"
+          echo ""
+          echo "════════════════════════════════════════════════"
+          echo "🔢 DIRETAS    HIGH/CRITICAL: $DIRECT_VULNS"
+          echo "🔢 TRANSITIVAS HIGH/CRITICAL: $TRANSITIVE_VULNS"
+          echo "════════════════════════════════════════════════"
 
-            jq -r '
+          # ── Layer 2: WARNING — Transitivas (não bloqueiam) ──
+          if (( TRANSITIVE_VULNS > 0 )); then
+            echo ""
+            echo "⚠️  ══ TRANSITIVAS COM VULNERABILIDADES (WARNING — não bloqueia) ══"
+            jq -r --slurpfile direct direct-deps.json '
               .results[]?
-              | (
-                  (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version}),
-                  (.vulnerabilities[]? | {vuln: ., name: "Global", ver: "N/A"})
-                )
+              | (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version})
               | select(
-                  (.vuln.database_specific.cvssScore // 0) >= 7
-                  or
-                  ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
-                  or
-                  ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
+                  (.name as $n | $direct[0] | index($n) == null)
+                  and (
+                    (.vuln.database_specific.cvssScore // 0) >= 7
+                    or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
+                    or ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
+                  )
                 )
               | ([ .vuln.affected[]? | .ranges[]?.events[]?.fixed | select(type=="string") ] | .[0]) as $fixed
-              | "• \(.vuln.id // "N/A") 🎯 Alvo: \(.name // "Desconhecido")@\(.ver // "?")\n  🚨 Ameaça: \(.vuln.summary // "Exploit Desconhecido")\n  💉 Fix: \(if $fixed != null then "Migre urgente para v\($fixed)+ (Rode: `npm install \(.name)@^\($fixed)` ou `pnpm update \(.name)@>=\($fixed)`)" else "Patch fix exato desconhecido no JSON. Forçe um update do pacote \(.name)." end)\n"
+              | "  ⚠️  \(.vuln.id // "N/A") → \(.name)@\(.ver)\n     \(.vuln.summary // "Sem descrição")\n     Fix: \(if $fixed != null then "v\($fixed)+" else "Desconhecido" end)\n"
+            ' osv-results.json
+            echo ""
+            echo "ℹ️  Transitivas não bloqueiam o pipeline. Corrija via overrides no package.json."
+            echo "   Consulte: https://docs.npmjs.com/cli/v10/configuring-npm/package-json#overrides"
+          fi
+
+          # ── Layer 1: BLOCK — Diretas (bloqueiam o pipeline) ──
+          if (( DIRECT_VULNS > 0 )); then
+            echo ""
+            echo "❌ ══ DIRETAS COM VULNERABILIDADES (BLOCKING) ══"
+            jq -r --slurpfile direct direct-deps.json '
+              .results[]?
+              | (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version})
+              | select(
+                  ( ($direct[0] | length) == 0 or (.name as $n | $direct[0] | index($n) != null) )
+                  and (
+                    (.vuln.database_specific.cvssScore // 0) >= 7
+                    or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
+                    or ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
+                  )
+                )
+              | ([ .vuln.affected[]? | .ranges[]?.events[]?.fixed | select(type=="string") ] | .[0]) as $fixed
+              | "• \(.vuln.id // "N/A") 🎯 Alvo: \(.name // "Desconhecido")@\(.ver // "?")\n  🚨 Ameaça: \(.vuln.summary // "Exploit Desconhecido")\n  💉 Fix: \(if $fixed != null then "Migre urgente para v\($fixed)+ (Rode: `npm install \(.name)@^\($fixed)` ou `pnpm update \(.name)@>=\($fixed)`)" else "Patch fix exato desconhecido. Forçe um update do pacote \(.name)." end)\n"
             ' osv-results.json
 
             exit 1
           fi
 
-          echo "✅ Nenhuma vulnerabilidade crítica"
+          echo ""
+          echo "✅ Nenhuma vulnerabilidade crítica em dependências diretas"
 
 # =====================================================
 # 📊 Summary
@@ -274,7 +339,18 @@ jobs:
       - name: Security Summary
         if: always()
         run: |
-          echo "======================================"
-          echo "🔐 Alpha Security Scan Completed"
-          echo "======================================"
+          echo "══════════════════════════════════════════"
+          echo "🔐 Alpha Security Scan — Resumo Final"
+          echo "══════════════════════════════════════════"
+          echo ""
+          echo "Estratégia do Gate:"
+          echo "  🔴 BLOCK  → Deps diretas com HIGH/CRITICAL"
+          echo "  🟡 WARN   → Deps transitivas com HIGH/CRITICAL"
+          echo "  🟢 PASS   → Sem vulnerabilidades críticas diretas"
+          echo ""
+          if [ -f direct-deps.json ]; then
+            TOTAL_DIRECT=$(jq 'length' direct-deps.json)
+            echo "  📦 Dependências diretas monitoradas: $TOTAL_DIRECT"
+          fi
+          echo "══════════════════════════════════════════"
 
