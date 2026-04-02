@@ -447,10 +447,6 @@ Quando o pipeline mostrar um WARNING para transitiva, use **overrides** no `pack
 
 > Veja a [seção 5](#5-usando-overrides-para-forçar-versões) para detalhes completos sobre overrides.
 
-### Customizando o comportamento
-
-Para **bloquear transitivas também** (modo paranóico), remova a classificação e trate tudo como direta passando um array vazio `[]` no `direct-deps.json`. Isso é o equivalente ao comportamento anterior do gate.
-
 ---
 
 ## 📎 Referências

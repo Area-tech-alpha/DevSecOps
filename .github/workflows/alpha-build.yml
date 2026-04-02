@@ -85,21 +85,26 @@ jobs:
           echo "@area-tech-alpha:registry=https://npm.pkg.github.com/" > .npmrc
           echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}" >> .npmrc
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Install Node dependencies
         if: steps.detect.outputs.node == 'true' && steps.cache-nm.outputs.cache-hit != 'true'
         run: |
           echo "📦 Installing dependencies (cache miss or update)"
 
-          if [ -f package-lock.json ]; then
+          if [ -f pnpm-lock.yaml ]; then
+            npm i -g pnpm
+            pnpm install --frozen-lockfile
+          elif [ -f yarn.lock ]; then
+            yarn install --frozen-lockfile
+          elif [ -f package-lock.json ]; then
             npm ci --legacy-peer-deps --no-engine-strict --prefer-offline || npm install --legacy-peer-deps --no-engine-strict --prefer-offline
           else
             npm install --legacy-peer-deps --no-engine-strict --prefer-offline
           fi
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
 
       # --------------------------------
       # Prisma (auto detect)
@@ -175,7 +180,9 @@ jobs:
 
       - name: Docker Build
         if: steps.detect.outputs.docker == 'true'
+        env:
+          NPM_TOKEN: ${{ secrets.PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           echo "🐳 Validating Docker build"
-          # No longer forcibly stripping --frozen-lockfile to prevent supply chain vulnerabilities
-          docker build -t alpha-ci-test .
+          # Pass the NPM_TOKEN build arg, which is needed by the Dockerfile during pnpm install
+          docker build --build-arg NPM_TOKEN="${NPM_TOKEN}" -t alpha-ci-test .
