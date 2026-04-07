@@ -143,6 +143,21 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: "dummy-key"
           CI: true
 
+      - name: Upload Build Artifacts
+        if: steps.detect.outputs.node == 'true' && steps.detect.outputs.docker != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-outputs-${{ github.sha }}
+          path: |
+            .next/
+            dist/
+            build/
+            out/
+            public/
+          if-no-files-found: ignore
+          retention-days: 1
+          overwrite: true
+
       # =====================================================
       # TYPESCRIPT
       # =====================================================

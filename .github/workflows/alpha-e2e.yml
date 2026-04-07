@@ -138,10 +138,33 @@ jobs:
           fi
 
       # --------------------------------
-      # Build App (Se necessário para o WebServer de E2E)
+      # Optimization: Tenta Usar Build Previsto
+      # --------------------------------
+      - name: Download Build Artifacts
+        id: download-build
+        if: steps.detect.outputs.framework != 'none'
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: build-outputs-${{ github.sha }}
+
+      - name: Check Artifact Download
+        id: check-artifact
+        if: steps.detect.outputs.framework != 'none'
+        run: |
+          if [ -d ".next" ] || [ -d "dist" ] || [ -d "build" ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "✅ Build artifacts restored successfully."
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "ℹ️ Build artifacts not found. Starting fallback..."
+          fi
+
+      # --------------------------------
+      # Build App (Fallback se faltar)
       # --------------------------------
       - name: Build Project
-        if: steps.detect.outputs.framework != 'none'
+        if: steps.detect.outputs.framework != 'none' && steps.check-artifact.outputs.found != 'true'
         run: |
           if node -e "process.exit(require('./package.json').scripts?.['build'] ? 0 : 1)" 2>/dev/null; then
             echo "🏗 Encontrado script de build, executando (necessário para o WebServer local)..."
