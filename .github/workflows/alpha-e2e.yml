@@ -152,9 +152,10 @@ jobs:
         id: check-artifact
         if: steps.detect.outputs.framework != 'none'
         run: |
-          if [ -d ".next" ] || [ -d "dist" ] || [ -d "build" ]; then
+          if [ -f "build-outputs.tar.gz" ]; then
+            tar -xzf build-outputs.tar.gz
             echo "found=true" >> $GITHUB_OUTPUT
-            echo "✅ Build artifacts restored successfully."
+            echo "✅ Build artifacts extracted successfully."
           else
             echo "found=false" >> $GITHUB_OUTPUT
             echo "ℹ️ Build artifacts not found. Starting fallback..."
