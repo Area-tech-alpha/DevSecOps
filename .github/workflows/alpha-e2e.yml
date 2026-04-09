@@ -91,13 +91,40 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
 
       # --------------------------------
-      # Playwright specific setup
+      # Playwright specific setup (Optimized with Cache)
       # --------------------------------
+      - name: Get Playwright version
+        if: steps.detect.outputs.framework == 'playwright'
+        id: playwright-version
+        run: |
+          VERSION=$(npm list @playwright/test --depth=0 | grep @playwright/test | cut -d'@' -f3)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Cache Playwright Browsers
+        if: steps.detect.outputs.framework == 'playwright'
+        id: cache-playwright
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright-version.outputs.version }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
       - name: Install Playwright Browsers
+        if: steps.detect.outputs.framework == 'playwright' && steps.cache-playwright.outputs.cache-hit != 'true'
+        run: |
+          echo "🌐 Instalando navegadores do Playwright via NPM"
+          if npm run | grep -q "test:e2e:install"; then
+            npm run test:e2e:install -- chromium
+          else
+            ./node_modules/.bin/playwright install chromium
+          fi
+
+      - name: Install Playwright System Deps
         if: steps.detect.outputs.framework == 'playwright'
         run: |
-          echo "🌐 Instalando navegadores do Playwright"
-          npx playwright install --with-deps
+          echo "📦 Verificando dependências de sistema"
+          ./node_modules/.bin/playwright install-deps chromium
 
       # --------------------------------
       # Optimization: Only run affected
@@ -207,9 +234,9 @@ jobs:
           elif [ "${{ steps.detect.outputs.framework }}" == "playwright" ]; then
             if [ -n "$TARGET_FILES" ]; then
               # Securely pass modified files
-              echo "$TARGET_FILES" | xargs -n 50 npx playwright test
+              echo "$TARGET_FILES" | xargs -n 50 ./node_modules/.bin/playwright test
             else
-              npx playwright test
+              ./node_modules/.bin/playwright test
             fi
 
           # 3. Cypress
@@ -217,8 +244,8 @@ jobs:
             if [ -n "$TARGET_FILES" ]; then
               # Cypress exige spec --spec "file1,file2"
               COMMA_FILES=$(echo "$TARGET_FILES" | sed 's/ /\,/g' | sed 's/,$//')
-              npx cypress run --spec "$COMMA_FILES"
+              ./node_modules/.bin/cypress run --spec "$COMMA_FILES"
             else
-              npx cypress run
+              ./node_modules/.bin/cypress run
             fi
           fi

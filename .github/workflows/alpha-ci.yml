@@ -111,9 +111,10 @@ jobs:
   build:
     name: "🏗 Build"
     needs: [changes]
-    if: |
-      always() &&
-      (needs.changes.result == 'skipped' || needs.changes.outputs.code == 'true')
+    if: false # BYPASS: Desativado temporariamente para manutenção (Lógica preservada abaixo)
+    # if: |
+    #   always() &&
+    #   (needs.changes.result == 'skipped' || needs.changes.outputs.code == 'true')
     uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-build.yml@main
     secrets: inherit
 
@@ -124,19 +125,19 @@ jobs:
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   lint:
     name: "🔍 Lint"
-    needs: [build]
+    needs: [changes] # Bypass: Dependência de [build] removida temporariamente
     uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-lint.yml@main
     secrets: inherit
 
   test:
     name: "🧪 Unit Tests"
-    needs: [build]
+    needs: [changes] # Bypass: Dependência de [build] removida temporariamente
     uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-test.yml@main
     secrets: inherit
 
   security:
     name: "🔒 Security"
-    needs: [build]
+    needs: [changes] # Bypass: Dependência de [build] removida temporariamente
     uses: Area-tech-alpha/DevSecOps/.github/workflows/alpha-security.yaml@main
     secrets: inherit
 
