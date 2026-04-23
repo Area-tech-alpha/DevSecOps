@@ -92,7 +92,8 @@ export default [
       "public",
       "build",
       ".next",
-      "out"
+      "out",
+      ".docusaurus"
     ]
   },
 
