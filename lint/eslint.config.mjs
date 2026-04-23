@@ -93,7 +93,9 @@ export default [
       "**/build/**",
       "**/.next/**",
       "**/out/**",
-      "**/.docusaurus/**"
+      "**/.docusaurus/**",
+      "**/next-env.d.ts",
+      "**/vite-env.d.ts"
     ]
   },
 
