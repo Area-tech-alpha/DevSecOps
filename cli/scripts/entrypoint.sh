@@ -78,7 +78,9 @@ done
 export VERBOSE AUTO_FIX REPORT_FORMAT REPORT_OUTPUT
 
 # ── Fix git ownership warning (container UID != host UID) ──
-git config --global --add safe.directory /workspace 2>/dev/null || true
+# Wildcard '*' is needed because tools like Gitleaks invoke git internally
+# and the specific /workspace path alone doesn't always propagate in time
+git config --global --add safe.directory '*' 2>/dev/null || true
 
 # ── Source detection ──
 source "$SCRIPTS_DIR/detect.sh"

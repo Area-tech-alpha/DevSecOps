@@ -8,6 +8,9 @@
 set -uo pipefail
 cd "$WORKSPACE"
 
+# Garante que git confia no workspace (container UID ≠ host UID)
+git config --global --add safe.directory '*' 2>/dev/null || true
+
 CONFIG_SEC="/opt/alpha-ci/config/security"
 
 # Fallback config path for --no-docker mode
