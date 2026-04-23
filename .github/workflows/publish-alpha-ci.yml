@@ -1,0 +1,102 @@
+name: Publish Alpha CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cli/**'
+      - 'security/**'
+      - 'lint/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: area-tech-alpha/alpha-ci
+
+jobs:
+  version-bump:
+    name: "🔢 Version Bump"
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.bump.outputs.new_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Bump patch version
+        id: bump
+        working-directory: cli
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          NEW=$(node -e "
+            const [major, minor, patch] = '$CURRENT'.split('.').map(Number);
+            console.log([major, minor, patch + 1].join('.'));
+          ")
+          npm version "$NEW" --no-git-tag-version
+          echo "new_version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "📦 Version: $CURRENT → $NEW"
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add cli/package.json
+          git diff --staged --quiet || git commit -m "chore: bump alpha-ci to v${{ steps.bump.outputs.new_version }}"
+          git push
+
+  publish-docker:
+    name: "🐳 Publish Docker Image"
+    runs-on: ubuntu-latest
+    needs: [version-bump]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: cli/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v${{ needs.version-bump.outputs.new_version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  publish-npm:
+    name: "📦 Publish NPM Package"
+    runs-on: ubuntu-latest
+    needs: [version-bump, publish-docker]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://npm.pkg.github.com
+          scope: '@area-tech-alpha'
+
+      - name: Publish to GPR
+        working-directory: cli
+        run: npm publish --access restricted
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

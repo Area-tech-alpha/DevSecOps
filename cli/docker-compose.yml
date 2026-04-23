@@ -1,0 +1,102 @@
+services:
+  alpha-ci:
+    image: ghcr.io/area-tech-alpha/alpha-ci:latest
+    build:
+      context: ..
+      dockerfile: cli/Dockerfile
+    volumes:
+      - ${TARGET_REPO:-.}:/workspace
+      - npm-cache:/root/.npm
+      - pip-cache:/root/.cache/pip
+      - pnpm-cache:/root/.local/share/pnpm/store
+    environment:
+      - SEMGREP_APP_TOKEN=${SEMGREP_APP_TOKEN:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN:-}
+      - AUTO_FIX=${AUTO_FIX:-false}
+      - REPORT_FORMAT=${REPORT_FORMAT:-text}
+      - REPORT_OUTPUT=${REPORT_OUTPUT:-}
+    command: all
+
+  security:
+    image: ghcr.io/area-tech-alpha/alpha-ci:latest
+    volumes:
+      - ${TARGET_REPO:-.}:/workspace
+    environment:
+      - SEMGREP_APP_TOKEN=${SEMGREP_APP_TOKEN:-}
+      - REPORT_FORMAT=${REPORT_FORMAT:-text}
+      - REPORT_OUTPUT=${REPORT_OUTPUT:-}
+    command: security
+
+  lint:
+    image: ghcr.io/area-tech-alpha/alpha-ci:latest
+    volumes:
+      - ${TARGET_REPO:-.}:/workspace
+      - npm-cache:/root/.npm
+      - pnpm-cache:/root/.local/share/pnpm/store
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN:-}
+      - AUTO_FIX=${AUTO_FIX:-false}
+    command: lint
+
+  lint-fix:
+    image: ghcr.io/area-tech-alpha/alpha-ci:latest
+    volumes:
+      - ${TARGET_REPO:-.}:/workspace
+      - npm-cache:/root/.npm
+      - pnpm-cache:/root/.local/share/pnpm/store
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN:-}
+      - AUTO_FIX=true
+    command: lint
+
+  test:
+    image: ghcr.io/area-tech-alpha/alpha-ci:latest
+    volumes:
+      - ${TARGET_REPO:-.}:/workspace
+      - npm-cache:/root/.npm
+      - pnpm-cache:/root/.local/share/pnpm/store
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN:-}
+    command: test
+
+  build:
+    image: ghcr.io/area-tech-alpha/alpha-ci:latest
+    volumes:
+      - ${TARGET_REPO:-.}:/workspace
+      - npm-cache:/root/.npm
+      - pnpm-cache:/root/.local/share/pnpm/store
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN:-}
+    command: build
+
+  e2e:
+    image: ghcr.io/area-tech-alpha/alpha-ci:latest
+    volumes:
+      - ${TARGET_REPO:-.}:/workspace
+      - npm-cache:/root/.npm
+      - pnpm-cache:/root/.local/share/pnpm/store
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN:-}
+    command: e2e
+
+  shell:
+    image: ghcr.io/area-tech-alpha/alpha-ci:latest
+    stdin_open: true
+    tty: true
+    volumes:
+      - ${TARGET_REPO:-.}:/workspace
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN:-}
+    command: shell
+
+volumes:
+  npm-cache:
+  pip-cache:
+  pnpm-cache:

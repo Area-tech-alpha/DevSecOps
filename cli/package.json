@@ -1,0 +1,39 @@
+{
+  "name": "@area-tech-alpha/alpha-ci",
+  "version": "1.0.0",
+  "description": "🛡️ Alpha CI — DevSecOps pipeline runner local. Roda security, lint, test e build igual ao GitHub Actions.",
+  "license": "UNLICENSED",
+  "private": false,
+  "type": "module",
+  "bin": {
+    "alpha-ci": "./bin/alpha-ci.mjs"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Area-tech-alpha/DevSecOps.git",
+    "directory": "cli"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "keywords": [
+    "devsecops",
+    "security",
+    "lint",
+    "ci",
+    "docker",
+    "gitleaks",
+    "semgrep",
+    "osv-scanner",
+    "golangci-lint",
+    "monorepo"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
