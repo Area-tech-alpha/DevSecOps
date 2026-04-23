@@ -101,18 +101,21 @@ run_stage() {
 
   local stage_start=$(date +%s)
 
-  if bash "$SCRIPTS_DIR/$script"; then
-    local stage_end=$(date +%s)
-    local stage_dur=$((stage_end - stage_start))
+  set +e
+  bash "$SCRIPTS_DIR/$script"
+  local exit_code=$?
+  set -e
+
+  local stage_end=$(date +%s)
+  local stage_dur=$((stage_end - stage_start))
+
+  if [ $exit_code -eq 0 ]; then
     echo -e "\n  ${GREEN}✅ ${name} — PASSED${NC} ${DIM}(${stage_dur}s)${NC}"
-    return 0
   else
-    local exit_code=$?
-    local stage_end=$(date +%s)
-    local stage_dur=$((stage_end - stage_start))
-    echo -e "\n  ${RED}❌ ${name} — FAILED${NC} ${DIM}(${stage_dur}s)${NC}"
-    return $exit_code
+    echo -e "\n  ${RED}❌ ${name} — FAILED (exit $exit_code)${NC} ${DIM}(${stage_dur}s)${NC}"
   fi
+
+  return $exit_code
 }
 
 summary() {
