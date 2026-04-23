@@ -86,14 +86,14 @@ export default [
 
   {
     ignores: [
-      "dist",
-      "node_modules",
-      "coverage",
-      "public",
-      "build",
-      ".next",
-      "out",
-      ".docusaurus"
+      "**/dist/**",
+      "**/node_modules/**",
+      "**/coverage/**",
+      "**/public/**",
+      "**/build/**",
+      "**/.next/**",
+      "**/out/**",
+      "**/.docusaurus/**"
     ]
   },
 
