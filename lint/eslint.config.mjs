@@ -88,7 +88,11 @@ export default [
     ignores: [
       "dist",
       "node_modules",
-      "coverage"
+      "coverage",
+      "public",
+      "build",
+      ".next",
+      "out"
     ]
   },
 

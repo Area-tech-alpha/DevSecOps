@@ -133,11 +133,11 @@ RUN mkdir -p /opt/alpha-ci/config/lint \
 COPY cli/scripts/ /opt/alpha-ci/scripts/
 RUN chmod +x /opt/alpha-ci/scripts/*.sh
 
-# ── Security: Create non-root user ──
-RUN useradd -m -s /bin/bash alpha-ci \
+# ── Security: Create non-root user (use UID 1000 to match host and avoid EACCES) ──
+RUN usermod -l alpha-ci ubuntu && groupmod -n alpha-ci ubuntu \
+    && usermod -d /home/alpha-ci -m alpha-ci \
     && mkdir -p /home/alpha-ci/.npm /home/alpha-ci/.cache/pip /home/alpha-ci/.local/share/pnpm/store \
-    && chown -R alpha-ci:alpha-ci /home/alpha-ci \
-    && chown -R alpha-ci:alpha-ci /opt/alpha-ci \
+    && chown -R alpha-ci:alpha-ci /home/alpha-ci /opt/alpha-ci \
     && chmod -R 755 /opt/alpha-ci/scripts
 
 # ── Security: /workspace needs to be writable by the user ──
