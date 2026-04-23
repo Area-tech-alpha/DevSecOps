@@ -82,6 +82,68 @@ export VERBOSE AUTO_FIX REPORT_FORMAT REPORT_OUTPUT
 # and the specific /workspace path alone doesn't always propagate in time
 git config --global --add safe.directory '*' 2>/dev/null || true
 
+# ── Sync configs from DevSecOps repo ──
+DEVSECOPS_RAW="https://raw.githubusercontent.com/Area-tech-alpha/DevSecOps/main"
+CONFIG_CACHE_FILE="/tmp/.alpha-ci-config-synced"
+CONFIG_CACHE_TTL=3600  # 1 hour
+
+sync_configs() {
+  # Skip if recently synced (cache TTL)
+  if [ -f "$CONFIG_CACHE_FILE" ]; then
+    local last_sync=$(cat "$CONFIG_CACHE_FILE" 2>/dev/null || echo 0)
+    local now=$(date +%s)
+    if (( now - last_sync < CONFIG_CACHE_TTL )); then
+      [ "$VERBOSE" = "true" ] && echo -e "  ${DIM}⏩ Configs sincronizados recentemente, usando cache${NC}"
+      return 0
+    fi
+  fi
+
+  echo -e "${CYAN}🔄 Sincronizando configs do DevSecOps...${NC}"
+
+  local sync_ok=true
+
+  # Security configs
+  mkdir -p "$CONFIG_DIR/security" 2>/dev/null || true
+  curl -fsSL "$DEVSECOPS_RAW/security/gitleaks.toml" -o "$CONFIG_DIR/security/gitleaks.toml.tmp" 2>/dev/null \
+    && mv "$CONFIG_DIR/security/gitleaks.toml.tmp" "$CONFIG_DIR/security/gitleaks.toml" \
+    && echo -e "  ${GREEN}✓${NC} gitleaks.toml atualizado" \
+    || { echo -e "  ${DIM}⚠ gitleaks.toml — usando versão embarcada${NC}"; sync_ok=false; }
+
+  curl -fsSL "$DEVSECOPS_RAW/security/osv-scanner.toml" -o "$CONFIG_DIR/security/osv-scanner.toml.tmp" 2>/dev/null \
+    && mv "$CONFIG_DIR/security/osv-scanner.toml.tmp" "$CONFIG_DIR/security/osv-scanner.toml" \
+    && echo -e "  ${GREEN}✓${NC} osv-scanner.toml atualizado" \
+    || { echo -e "  ${DIM}⚠ osv-scanner.toml — usando versão embarcada${NC}"; sync_ok=false; }
+
+  # Lint configs
+  mkdir -p "$CONFIG_DIR/lint" 2>/dev/null || true
+  curl -fsSL "$DEVSECOPS_RAW/lint/eslint.config.mjs" -o "$CONFIG_DIR/lint/eslint.config.mjs.tmp" 2>/dev/null \
+    && mv "$CONFIG_DIR/lint/eslint.config.mjs.tmp" "$CONFIG_DIR/lint/eslint.config.mjs" \
+    && echo -e "  ${GREEN}✓${NC} eslint.config.mjs atualizado" \
+    || { echo -e "  ${DIM}⚠ eslint.config.mjs — usando versão embarcada${NC}"; sync_ok=false; }
+
+  curl -fsSL "$DEVSECOPS_RAW/lint/.eslintignore" -o "$CONFIG_DIR/lint/.eslintignore.tmp" 2>/dev/null \
+    && mv "$CONFIG_DIR/lint/.eslintignore.tmp" "$CONFIG_DIR/lint/.eslintignore" \
+    && echo -e "  ${GREEN}✓${NC} .eslintignore atualizado" \
+    || { echo -e "  ${DIM}⚠ .eslintignore — usando versão embarcada${NC}"; sync_ok=false; }
+
+  curl -fsSL "$DEVSECOPS_RAW/lint/.editorconfig" -o "$CONFIG_DIR/lint/.editorconfig.tmp" 2>/dev/null \
+    && mv "$CONFIG_DIR/lint/.editorconfig.tmp" "$CONFIG_DIR/lint/.editorconfig" \
+    && echo -e "  ${GREEN}✓${NC} .editorconfig atualizado" \
+    || { echo -e "  ${DIM}⚠ .editorconfig — usando versão embarcada${NC}"; sync_ok=false; }
+
+  # Marca timestamp do sync
+  date +%s > "$CONFIG_CACHE_FILE"
+
+  if [ "$sync_ok" = "true" ]; then
+    echo -e "  ${GREEN}✅ Todos os configs sincronizados com DevSecOps/main${NC}"
+  else
+    echo -e "  ${YELLOW}⚠️ Alguns configs não puderam ser atualizados (offline?)${NC}"
+  fi
+  echo ""
+}
+
+sync_configs
+
 # ── Source detection ──
 source "$SCRIPTS_DIR/detect.sh"
 
