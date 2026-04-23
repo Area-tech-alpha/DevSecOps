@@ -102,12 +102,29 @@ if [ "$IS_NODE" = "true" ]; then
     ESLINT_ARGS+=("--no-error-on-unmatched-pattern")
     [ -n "$FIX_FLAG" ] && ESLINT_ARGS+=("$FIX_FLAG")
 
-    "$ESLINT_BIN" "${ESLINT_ARGS[@]}"
+    # Mute warnings to prevent output pollution unless VERBOSE is true
+    if [ "${VERBOSE:-false}" != "true" ]; then
+      ESLINT_ARGS+=("--quiet")
+    fi
+
+    # Run ESLint and capture output
+    "$ESLINT_BIN" "${ESLINT_ARGS[@]}" > /tmp/eslint-output.log 2>&1
     ESLINT_EXIT=$?
     set -e
 
     if [ $ESLINT_EXIT -ne 0 ]; then
-      echo -e "  ${RED}❌ ESLint encontrou problemas${NC}"
+      echo -e "  ${RED}❌ ESLint encontrou problemas:${NC}"
+      
+      # Exibir apenas as primeiras linhas se for muito longo
+      TOTAL_LINES=$(wc -l < /tmp/eslint-output.log)
+      if [ "$TOTAL_LINES" -gt 30 ] && [ "${VERBOSE:-false}" != "true" ]; then
+        head -n 25 /tmp/eslint-output.log
+        echo -e "\n  ${DIM}... ($((TOTAL_LINES - 25)) linhas ocultadas. Use --verbose para ver tudo) ...${NC}\n"
+        tail -n 3 /tmp/eslint-output.log
+      else
+        cat /tmp/eslint-output.log
+      fi
+      
       OVERALL_EXIT=1
     else
       echo -e "  ${GREEN}✅ ESLint: Sem problemas${NC}"
