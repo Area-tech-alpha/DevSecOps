@@ -9,7 +9,8 @@ set -uo pipefail
 cd "$WORKSPACE"
 
 # Garante que git confia no workspace (container UID ≠ host UID)
-git config --global --add safe.directory '*' 2>/dev/null || true
+# SECURITY: Only trust the specific workspace, not wildcard '*'
+git config --global --add safe.directory "$WORKSPACE" 2>/dev/null || true
 
 CONFIG_SEC="/opt/alpha-ci/config/security"
 
@@ -33,15 +34,18 @@ fi
 if [ "$SKIP_GITLEAKS" = "false" ]; then
   echo -e "${CYAN}🔐 Rodando Gitleaks...${NC}"
 
-  GITLEAKS_ARGS="detect --source=. --redact -v"
-  [ -n "$CONFIG_SEC" ] && [ -f "$CONFIG_SEC/gitleaks.toml" ] && GITLEAKS_ARGS="$GITLEAKS_ARGS --config=$CONFIG_SEC/gitleaks.toml"
+  # SECURITY: Use bash arrays to prevent word splitting / injection
+  GITLEAKS_ARGS=("detect" "--source=." "--redact" "-v")
+  if [ -n "$CONFIG_SEC" ] && [ -f "$CONFIG_SEC/gitleaks.toml" ]; then
+    GITLEAKS_ARGS+=("--config=$CONFIG_SEC/gitleaks.toml")
+  fi
 
   # Report output if requested
   if [ "${REPORT_FORMAT:-text}" != "text" ]; then
-    GITLEAKS_ARGS="$GITLEAKS_ARGS --report-format json --report-path /tmp/gitleaks-report.json"
+    GITLEAKS_ARGS+=("--report-format" "json" "--report-path" "/tmp/gitleaks-report.json")
   fi
 
-  gitleaks $GITLEAKS_ARGS &
+  gitleaks "${GITLEAKS_ARGS[@]}" &
   PID_GIT=$!
 fi
 
@@ -73,14 +77,13 @@ if [ "$SKIP_OSV" = "false" ]; then
     echo -e "${CYAN}📦 Rodando OSV Scanner...${NC}"
     echo "$LOCKFILES"
 
-    CMD_ARGS=""
-    for LF in $LOCKFILES; do
-      CMD_ARGS="$CMD_ARGS -L $LF"
-    done
+    # SECURITY: Use bash array for arguments
+    CMD_ARGS=("scan" "--format" "json")
+    while IFS= read -r LF; do
+      [ -n "$LF" ] && CMD_ARGS+=("-L" "$LF")
+    done <<< "$LOCKFILES"
 
-    osv-scanner scan \
-      --format json \
-      $CMD_ARGS > /tmp/osv-results.json 2>/tmp/osv-errors.log &
+    osv-scanner "${CMD_ARGS[@]}" > /tmp/osv-results.json 2>/tmp/osv-errors.log &
     PID_OSV=$!
   fi
 fi
@@ -97,19 +100,21 @@ fi
 
 if [ "$SKIP_SEMGREP" = "false" ]; then
   echo -e "${CYAN}🛡️ Rodando Semgrep...${NC}"
-  SEMGREP_ARGS="--config=p/security-audit"
+
+  # SECURITY: Use bash array for arguments
+  SEMGREP_ARGS=("scan" "--config=p/security-audit")
   if [ "$IS_REACT" = "true" ]; then
-    SEMGREP_ARGS="$SEMGREP_ARGS --config=p/react"
+    SEMGREP_ARGS+=("--config=p/react")
   fi
 
   # Report output
   if [ "${REPORT_FORMAT:-text}" != "text" ]; then
-    SEMGREP_ARGS="$SEMGREP_ARGS --json --output /tmp/semgrep-report.json"
+    SEMGREP_ARGS+=("--json" "--output" "/tmp/semgrep-report.json")
   else
-    SEMGREP_ARGS="$SEMGREP_ARGS --quiet"
+    SEMGREP_ARGS+=("--quiet")
   fi
 
-  semgrep scan $SEMGREP_ARGS &
+  semgrep "${SEMGREP_ARGS[@]}" &
   PID_SEM=$!
 fi
 

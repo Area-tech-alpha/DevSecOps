@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # ╔══════════════════════════════════════════════════════════════╗
 # ║  Alpha CI — Installer                                        ║
-# ║  curl -fsSL https://raw.githubusercontent.com/               ║
-# ║    Area-tech-alpha/DevSecOps/main/cli/install.sh | bash      ║
+# ║  Instalação segura: Baixe o script, revise, e execute.       ║
+# ║  bash <(curl -fsSL https://raw.githubusercontent.com/        ║
+# ║    Area-tech-alpha/DevSecOps/main/cli/install.sh)            ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 set -euo pipefail
@@ -45,16 +46,32 @@ IMAGE="ghcr.io/area-tech-alpha/alpha-ci:latest"
 
 if docker pull "$IMAGE" 2>/dev/null; then
   echo -e "  ${GREEN}✓${NC} Imagem baixada: $IMAGE"
+
+  # Verify the image has the expected entrypoint
+  ENTRYPOINT=$(docker inspect --format='{{json .Config.Entrypoint}}' "$IMAGE" 2>/dev/null || echo "")
+  if echo "$ENTRYPOINT" | grep -q "entrypoint.sh"; then
+    echo -e "  ${GREEN}✓${NC} Entrypoint verificado"
+  else
+    echo -e "  ${DIM}⚠ Não foi possível verificar entrypoint da imagem${NC}"
+  fi
 else
   echo -e "  ${DIM}GHCR indisponível. Tentando build local...${NC}"
 
   TMPDIR=$(mktemp -d)
+  # SECURITY: Ensure cleanup on exit
+  trap 'rm -rf "$TMPDIR"' EXIT
+
   echo -e "${CYAN}📥 Clonando DevSecOps...${NC}"
   git clone --depth 1 https://github.com/Area-tech-alpha/DevSecOps.git "$TMPDIR/DevSecOps" 2>/dev/null
 
+  # SECURITY: Verify expected files exist before building
+  if [ ! -f "$TMPDIR/DevSecOps/cli/Dockerfile" ]; then
+    echo -e "${RED}❌ Dockerfile não encontrado no repositório clonado.${NC}"
+    exit 1
+  fi
+
   echo -e "${CYAN}🏗 Construindo imagem...${NC}"
   docker build -t alpha-ci:latest -f "$TMPDIR/DevSecOps/cli/Dockerfile" "$TMPDIR/DevSecOps"
-  rm -rf "$TMPDIR"
   echo -e "  ${GREEN}✓${NC} Imagem construída: alpha-ci:latest"
 fi
 
@@ -78,5 +95,10 @@ echo -e "  ${CYAN}cd seu-projeto${NC}"
 echo -e "  ${CYAN}alpha-ci security${NC}    # Scan de segurança"
 echo -e "  ${CYAN}alpha-ci lint${NC}        # Linting"
 echo -e "  ${CYAN}alpha-ci all${NC}         # Pipeline completo"
+echo ""
+echo -e "${BOLD}⚠️  Segurança:${NC}"
+echo -e "  ${DIM}Tokens devem ser configurados via variáveis de ambiente:${NC}"
+echo -e "  ${CYAN}export GITHUB_TOKEN=ghp_xxx${NC}"
+echo -e "  ${CYAN}export SEMGREP_APP_TOKEN=xxx${NC}"
 echo ""
 echo -e "${DIM}Docs: https://github.com/Area-tech-alpha/DevSecOps/tree/main/cli${NC}"

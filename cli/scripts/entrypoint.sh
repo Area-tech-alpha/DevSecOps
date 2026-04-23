@@ -78,14 +78,31 @@ done
 export VERBOSE AUTO_FIX REPORT_FORMAT REPORT_OUTPUT
 
 # ── Fix git ownership warning (container UID != host UID) ──
-# Wildcard '*' is needed because tools like Gitleaks invoke git internally
-# and the specific /workspace path alone doesn't always propagate in time
-git config --global --add safe.directory '*' 2>/dev/null || true
+# SECURITY: Only mark the specific workspace as safe (not '*' wildcard)
+# This prevents malicious git hooks from being trusted in arbitrary directories
+git config --global --add safe.directory "$WORKSPACE" 2>/dev/null || true
 
 # ── Sync configs from DevSecOps repo ──
 DEVSECOPS_RAW="https://raw.githubusercontent.com/Area-tech-alpha/DevSecOps/main"
 CONFIG_CACHE_FILE="/tmp/.alpha-ci-config-synced"
 CONFIG_CACHE_TTL=3600  # 1 hour
+
+# SECURITY: Validate downloaded config files are not malicious
+validate_config_file() {
+  local file="$1"
+  local ext="${file##*.}"
+  
+  # Block executable content in non-JS config files
+  if [ "$ext" = "toml" ]; then
+    # TOML files should not contain shell commands or JS
+    if grep -qE '(exec|spawn|child_process|require\(|import |\$\(|`.*`)' "$file" 2>/dev/null; then
+      echo -e "  ${RED}🚨 Config rejeitado: conteúdo suspeito em $file${NC}"
+      rm -f "$file"
+      return 1
+    fi
+  fi
+  return 0
+}
 
 sync_configs() {
   # Skip if recently synced (cache TTL)
@@ -104,29 +121,38 @@ sync_configs() {
 
   # Security configs
   mkdir -p "$CONFIG_DIR/security" 2>/dev/null || true
-  curl -fsSL "$DEVSECOPS_RAW/security/gitleaks.toml" -o "$CONFIG_DIR/security/gitleaks.toml.tmp" 2>/dev/null \
+  curl -fsSL --max-time 10 "$DEVSECOPS_RAW/security/gitleaks.toml" -o "$CONFIG_DIR/security/gitleaks.toml.tmp" 2>/dev/null \
+    && validate_config_file "$CONFIG_DIR/security/gitleaks.toml.tmp" \
     && mv "$CONFIG_DIR/security/gitleaks.toml.tmp" "$CONFIG_DIR/security/gitleaks.toml" \
     && echo -e "  ${GREEN}✓${NC} gitleaks.toml atualizado" \
     || { echo -e "  ${DIM}⚠ gitleaks.toml — usando versão embarcada${NC}"; sync_ok=false; }
 
-  curl -fsSL "$DEVSECOPS_RAW/security/osv-scanner.toml" -o "$CONFIG_DIR/security/osv-scanner.toml.tmp" 2>/dev/null \
+  curl -fsSL --max-time 10 "$DEVSECOPS_RAW/security/osv-scanner.toml" -o "$CONFIG_DIR/security/osv-scanner.toml.tmp" 2>/dev/null \
+    && validate_config_file "$CONFIG_DIR/security/osv-scanner.toml.tmp" \
     && mv "$CONFIG_DIR/security/osv-scanner.toml.tmp" "$CONFIG_DIR/security/osv-scanner.toml" \
     && echo -e "  ${GREEN}✓${NC} osv-scanner.toml atualizado" \
     || { echo -e "  ${DIM}⚠ osv-scanner.toml — usando versão embarcada${NC}"; sync_ok=false; }
 
   # Lint configs
   mkdir -p "$CONFIG_DIR/lint" 2>/dev/null || true
-  curl -fsSL "$DEVSECOPS_RAW/lint/eslint.config.mjs" -o "$CONFIG_DIR/lint/eslint.config.mjs.tmp" 2>/dev/null \
-    && mv "$CONFIG_DIR/lint/eslint.config.mjs.tmp" "$CONFIG_DIR/lint/eslint.config.mjs" \
-    && echo -e "  ${GREEN}✓${NC} eslint.config.mjs atualizado" \
+  # SECURITY: eslint.config.mjs is executable JS — only sync if content looks safe
+  curl -fsSL --max-time 10 "$DEVSECOPS_RAW/lint/eslint.config.mjs" -o "$CONFIG_DIR/lint/eslint.config.mjs.tmp" 2>/dev/null \
+    && if grep -qE '(child_process|execSync|spawnSync|\bexec\b|\bspawn\b|require\(.fs.)' "$CONFIG_DIR/lint/eslint.config.mjs.tmp" 2>/dev/null; then
+         echo -e "  ${RED}🚨 eslint.config.mjs rejeitado: imports perigosos detectados${NC}"
+         rm -f "$CONFIG_DIR/lint/eslint.config.mjs.tmp"
+         sync_ok=false
+       else
+         mv "$CONFIG_DIR/lint/eslint.config.mjs.tmp" "$CONFIG_DIR/lint/eslint.config.mjs"
+         echo -e "  ${GREEN}✓${NC} eslint.config.mjs atualizado"
+       fi \
     || { echo -e "  ${DIM}⚠ eslint.config.mjs — usando versão embarcada${NC}"; sync_ok=false; }
 
-  curl -fsSL "$DEVSECOPS_RAW/lint/.eslintignore" -o "$CONFIG_DIR/lint/.eslintignore.tmp" 2>/dev/null \
+  curl -fsSL --max-time 10 "$DEVSECOPS_RAW/lint/.eslintignore" -o "$CONFIG_DIR/lint/.eslintignore.tmp" 2>/dev/null \
     && mv "$CONFIG_DIR/lint/.eslintignore.tmp" "$CONFIG_DIR/lint/.eslintignore" \
     && echo -e "  ${GREEN}✓${NC} .eslintignore atualizado" \
     || { echo -e "  ${DIM}⚠ .eslintignore — usando versão embarcada${NC}"; sync_ok=false; }
 
-  curl -fsSL "$DEVSECOPS_RAW/lint/.editorconfig" -o "$CONFIG_DIR/lint/.editorconfig.tmp" 2>/dev/null \
+  curl -fsSL --max-time 10 "$DEVSECOPS_RAW/lint/.editorconfig" -o "$CONFIG_DIR/lint/.editorconfig.tmp" 2>/dev/null \
     && mv "$CONFIG_DIR/lint/.editorconfig.tmp" "$CONFIG_DIR/lint/.editorconfig" \
     && echo -e "  ${GREEN}✓${NC} .editorconfig atualizado" \
     || { echo -e "  ${DIM}⚠ .editorconfig — usando versão embarcada${NC}"; sync_ok=false; }

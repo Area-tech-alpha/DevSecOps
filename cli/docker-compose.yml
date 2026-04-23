@@ -6,9 +6,12 @@ services:
       dockerfile: cli/Dockerfile
     volumes:
       - ${TARGET_REPO:-.}:/workspace
-      - npm-cache:/root/.npm
-      - pip-cache:/root/.cache/pip
-      - pnpm-cache:/root/.local/share/pnpm/store
+      - npm-cache:/home/alpha-ci/.npm
+      - pip-cache:/home/alpha-ci/.cache/pip
+      - pnpm-cache:/home/alpha-ci/.local/share/pnpm/store
+    env_file:
+      - path: ./.env.alpha-ci
+        required: false
     environment:
       - SEMGREP_APP_TOKEN=${SEMGREP_APP_TOKEN:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
@@ -16,6 +19,12 @@ services:
       - AUTO_FIX=${AUTO_FIX:-false}
       - REPORT_FORMAT=${REPORT_FORMAT:-text}
       - REPORT_OUTPUT=${REPORT_OUTPUT:-}
+    # Security hardening
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
+    read_only: false
     command: all
 
   security:
@@ -26,63 +35,87 @@ services:
       - SEMGREP_APP_TOKEN=${SEMGREP_APP_TOKEN:-}
       - REPORT_FORMAT=${REPORT_FORMAT:-text}
       - REPORT_OUTPUT=${REPORT_OUTPUT:-}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
     command: security
 
   lint:
     image: ghcr.io/area-tech-alpha/alpha-ci:latest
     volumes:
       - ${TARGET_REPO:-.}:/workspace
-      - npm-cache:/root/.npm
-      - pnpm-cache:/root/.local/share/pnpm/store
+      - npm-cache:/home/alpha-ci/.npm
+      - pnpm-cache:/home/alpha-ci/.local/share/pnpm/store
     environment:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN:-}
       - AUTO_FIX=${AUTO_FIX:-false}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
     command: lint
 
   lint-fix:
     image: ghcr.io/area-tech-alpha/alpha-ci:latest
     volumes:
       - ${TARGET_REPO:-.}:/workspace
-      - npm-cache:/root/.npm
-      - pnpm-cache:/root/.local/share/pnpm/store
+      - npm-cache:/home/alpha-ci/.npm
+      - pnpm-cache:/home/alpha-ci/.local/share/pnpm/store
     environment:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN:-}
       - AUTO_FIX=true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
     command: lint
 
   test:
     image: ghcr.io/area-tech-alpha/alpha-ci:latest
     volumes:
       - ${TARGET_REPO:-.}:/workspace
-      - npm-cache:/root/.npm
-      - pnpm-cache:/root/.local/share/pnpm/store
+      - npm-cache:/home/alpha-ci/.npm
+      - pnpm-cache:/home/alpha-ci/.local/share/pnpm/store
     environment:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN:-}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
     command: test
 
   build:
     image: ghcr.io/area-tech-alpha/alpha-ci:latest
     volumes:
       - ${TARGET_REPO:-.}:/workspace
-      - npm-cache:/root/.npm
-      - pnpm-cache:/root/.local/share/pnpm/store
+      - npm-cache:/home/alpha-ci/.npm
+      - pnpm-cache:/home/alpha-ci/.local/share/pnpm/store
     environment:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN:-}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
     command: build
 
   e2e:
     image: ghcr.io/area-tech-alpha/alpha-ci:latest
     volumes:
       - ${TARGET_REPO:-.}:/workspace
-      - npm-cache:/root/.npm
-      - pnpm-cache:/root/.local/share/pnpm/store
+      - npm-cache:/home/alpha-ci/.npm
+      - pnpm-cache:/home/alpha-ci/.local/share/pnpm/store
     environment:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN:-}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
     command: e2e
 
   shell:
@@ -94,6 +127,10 @@ services:
     environment:
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
       - NODE_AUTH_TOKEN=${NODE_AUTH_TOKEN:-}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
     command: shell
 
 volumes:

@@ -95,12 +95,14 @@ if [ "$IS_NODE" = "true" ]; then
 
   if [ -n "$ESLINT_BIN" ]; then
     set +e
-    ESLINT_ARGS="."
-    [ -n "$ESLINT_CONFIG" ] && ESLINT_ARGS="$ESLINT_ARGS --config $ESLINT_CONFIG"
-    ESLINT_ARGS="$ESLINT_ARGS --no-error-on-unmatched-pattern"
-    [ -n "$FIX_FLAG" ] && ESLINT_ARGS="$ESLINT_ARGS $FIX_FLAG"
 
-    $ESLINT_BIN $ESLINT_ARGS
+    # SECURITY: Use bash array for arguments (prevents word splitting / injection)
+    ESLINT_ARGS=(".")
+    [ -n "$ESLINT_CONFIG" ] && ESLINT_ARGS+=("--config" "$ESLINT_CONFIG")
+    ESLINT_ARGS+=("--no-error-on-unmatched-pattern")
+    [ -n "$FIX_FLAG" ] && ESLINT_ARGS+=("$FIX_FLAG")
+
+    "$ESLINT_BIN" "${ESLINT_ARGS[@]}"
     ESLINT_EXIT=$?
     set -e
 
@@ -123,8 +125,12 @@ if [ "$IS_PYTHON" = "true" ]; then
   if command -v ruff &>/dev/null; then
     echo -e "\n${CYAN}🐍 Rodando Ruff (Python Linter)...${NC}"
 
+    # SECURITY: Use bash array for arguments
+    RUFF_ARGS=("check" ".")
+    [ -n "$RUFF_FIX_FLAG" ] && RUFF_ARGS+=("$RUFF_FIX_FLAG")
+
     set +e
-    ruff check . $RUFF_FIX_FLAG
+    ruff "${RUFF_ARGS[@]}"
     RUFF_EXIT=$?
     set -e
 
@@ -149,8 +155,12 @@ if [ "$IS_GO" = "true" ]; then
   if command -v golangci-lint &>/dev/null; then
     echo -e "\n${CYAN}🐹 Rodando golangci-lint (Go Linter)...${NC}"
 
+    # SECURITY: Use bash array for arguments
+    GOLANGCI_ARGS=("run" "./...")
+    [ -n "$GOLANGCI_FIX_FLAG" ] && GOLANGCI_ARGS+=("$GOLANGCI_FIX_FLAG")
+
     set +e
-    golangci-lint run ./... $GOLANGCI_FIX_FLAG
+    golangci-lint "${GOLANGCI_ARGS[@]}"
     GOLANGCI_EXIT=$?
     set -e
 

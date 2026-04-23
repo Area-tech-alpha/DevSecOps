@@ -3,3 +3,12 @@
 node_modules
 *.md
 !cli/README.md
+# Security: prevent sensitive config files from being included in the image
+.npmrc
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*

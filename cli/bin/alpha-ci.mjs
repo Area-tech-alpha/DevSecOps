@@ -5,9 +5,10 @@
 // ║  Permite: npx @area-tech-alpha/alpha-ci security             ║
 // ╚══════════════════════════════════════════════════════════════╝
 
-import { execSync, spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve, basename } from 'node:path';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, realpathSync } from 'node:fs';
+import { resolve, basename, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const IMAGE = 'ghcr.io/area-tech-alpha/alpha-ci:latest';
 const IMAGE_LOCAL = 'alpha-ci:latest';
@@ -24,11 +25,22 @@ const log = (msg) => console.log(msg);
 const error = (msg) => console.error(`${c.red}${msg}${c.reset}`);
 const info = (msg) => console.log(`${c.cyan}${msg}${c.reset}`);
 
+// ── Allowed commands (whitelist) ──
+const ALLOWED_COMMANDS = new Set([
+  'all', 'security', 'lint', 'test', 'build', 'e2e', 'shell', 'detect', 'help',
+]);
+
 // ── Parse args ──
 const args = process.argv.slice(2);
 const command = args[0] || 'help';
 
-// Extract options
+// Validate command against whitelist
+if (!ALLOWED_COMMANDS.has(command) && command !== '--help' && command !== '-h' && command !== '--version') {
+  error(`❌ Comando desconhecido: ${command}`);
+  process.exit(1);
+}
+
+// Extract options — tokens ONLY from env vars (never CLI args)
 let targetPath = process.cwd();
 let verbose = false;
 let rebuild = false;
@@ -36,8 +48,15 @@ let noDocker = false;
 let autoFix = false;
 let reportFormat = 'text';
 let reportOutput = '';
-let semgrepToken = process.env.SEMGREP_APP_TOKEN || '';
-let githubToken = process.env.GITHUB_TOKEN || process.env.NODE_AUTH_TOKEN || '';
+
+// Security: Tokens are sourced ONLY from environment variables.
+// Passing secrets via CLI args leaks them into shell history,
+// process listings (ps aux), and audit logs.
+const semgrepToken = process.env.SEMGREP_APP_TOKEN || '';
+const githubToken = process.env.GITHUB_TOKEN || process.env.NODE_AUTH_TOKEN || '';
+
+// ── Allowed report formats (whitelist) ──
+const ALLOWED_FORMATS = new Set(['text', 'json', 'sarif']);
 
 for (let i = 1; i < args.length; i++) {
   switch (args[i]) {
@@ -56,18 +75,26 @@ for (let i = 1; i < args.length; i++) {
     case '--fix':
       autoFix = true;
       break;
-    case '--format':
-      reportFormat = args[++i] || 'text';
+    case '--format': {
+      const fmt = args[++i] || 'text';
+      if (!ALLOWED_FORMATS.has(fmt)) {
+        error(`❌ Formato inválido: ${fmt}. Use: text, json, sarif`);
+        process.exit(1);
+      }
+      reportFormat = fmt;
       break;
+    }
     case '--output':
       reportOutput = args[++i] || '';
       break;
     case '--semgrep-token':
-      semgrepToken = args[++i] || '';
-      break;
     case '--github-token':
-      githubToken = args[++i] || '';
-      break;
+      error(`⚠️  --${args[i].replace('--', '')} foi removido por segurança.`);
+      error(`   Use a variável de ambiente correspondente:`);
+      error(`   export SEMGREP_APP_TOKEN=<token>`);
+      error(`   export GITHUB_TOKEN=<token>`);
+      i++; // skip the value
+      process.exit(1);
     case '--version':
       log(`alpha-ci v${VERSION}`);
       process.exit(0);
@@ -103,8 +130,6 @@ ${c.bold}Options:${c.reset}
   ${c.yellow}--format <json|sarif|text>${c.reset} Formato do output (default: text)
   ${c.yellow}--output <file>${c.reset}            Salva relatório em arquivo
   ${c.yellow}--rebuild${c.reset}                 Força rebuild da imagem Docker
-  ${c.yellow}--semgrep-token <token>${c.reset}   Token do Semgrep (opcional)
-  ${c.yellow}--github-token <token>${c.reset}    GitHub PAT (para packages privados)
   ${c.yellow}--version${c.reset}                 Mostra a versão
 
 ${c.bold}Examples:${c.reset}
@@ -140,17 +165,83 @@ if (!existsSync(targetPath)) {
   process.exit(1);
 }
 
-// ── Check Docker ──
+// ── Security: Validate target path against path traversal ──
+function validateTargetPath(p) {
+  let realPath;
+  try {
+    realPath = realpathSync(p);
+  } catch {
+    error(`❌ Não foi possível resolver o caminho: ${p}`);
+    process.exit(1);
+  }
+
+  // Block mounting sensitive system directories
+  const BLOCKED_PATHS = [
+    '/etc', '/var', '/usr', '/bin', '/sbin', '/boot', '/dev',
+    '/proc', '/sys', '/root', '/run', '/lib', '/lib64',
+  ];
+
+  for (const blocked of BLOCKED_PATHS) {
+    if (realPath === blocked || realPath.startsWith(blocked + '/')) {
+      error(`❌ Acesso bloqueado: ${realPath}`);
+      error(`   O Alpha CI não pode montar diretórios do sistema.`);
+      error(`   Use um diretório de projeto válido.`);
+      process.exit(1);
+    }
+  }
+
+  // Warn if mounting home root
+  const homeDir = process.env.HOME || '';
+  if (realPath === homeDir) {
+    error(`⚠️  Montar o diretório HOME inteiro não é recomendado.`);
+    error(`   Aponte para o repositório específico.`);
+    process.exit(1);
+  }
+
+  return realPath;
+}
+
+targetPath = validateTargetPath(targetPath);
+
+// ── Security: Validate report output path ──
+function validateOutputPath(output, target) {
+  if (!output) return '';
+
+  const resolvedOutput = resolve(target, output);
+  let outputDir;
+  try {
+    // dirname may not exist yet, check parent
+    outputDir = realpathSync(dirname(resolvedOutput));
+  } catch {
+    outputDir = dirname(resolvedOutput);
+  }
+
+  const realTarget = realpathSync(target);
+  if (!outputDir.startsWith(realTarget)) {
+    error(`❌ O caminho de output deve estar dentro do diretório alvo.`);
+    error(`   Target: ${realTarget}`);
+    error(`   Output: ${resolvedOutput}`);
+    process.exit(1);
+  }
+
+  return resolvedOutput;
+}
+
+if (reportOutput) {
+  reportOutput = validateOutputPath(reportOutput, targetPath);
+}
+
+// ── Check Docker (using execFileSync — no shell interpolation) ──
 function dockerAvailable() {
   try {
-    execSync('docker info', { stdio: 'ignore' });
+    execFileSync('docker', ['info'], { stdio: 'ignore' });
     return true;
   } catch { return false; }
 }
 
 function imageExists(img) {
   try {
-    execSync(`docker image inspect ${img}`, { stdio: 'ignore' });
+    execFileSync('docker', ['image', 'inspect', img], { stdio: 'ignore' });
     return true;
   } catch { return false; }
 }
@@ -159,7 +250,7 @@ function pullOrBuild() {
   // Try pulling from GHCR first
   info('📦 Puxando imagem Docker...');
   try {
-    execSync(`docker pull ${IMAGE}`, { stdio: 'inherit' });
+    execFileSync('docker', ['pull', IMAGE], { stdio: 'inherit' });
     return IMAGE;
   } catch {
     log(`${c.dim}  GHCR indisponível, tentando build local...${c.reset}`);
@@ -169,9 +260,11 @@ function pullOrBuild() {
   const cliDir = findCliDir();
   if (cliDir && existsSync(`${cliDir}/Dockerfile`)) {
     info('🏗 Construindo imagem local...');
-    execSync(`docker build -t ${IMAGE_LOCAL} -f ${cliDir}/Dockerfile ${cliDir}/..`, {
-      stdio: 'inherit',
-    });
+    execFileSync('docker', [
+      'build', '-t', IMAGE_LOCAL,
+      '-f', `${cliDir}/Dockerfile`,
+      `${cliDir}/..`,
+    ], { stdio: 'inherit' });
     return IMAGE_LOCAL;
   }
 
@@ -193,6 +286,31 @@ function findCliDir() {
     if (existsSync(`${dir}/Dockerfile`)) return dir;
   }
   return null;
+}
+
+// ── Create secure env file for Docker (avoids token leakage via ps/inspect) ──
+function createEnvFile() {
+  const envFilePath = resolve(tmpdir(), `.alpha-ci-env-${process.pid}-${Date.now()}`);
+  const envContent = [
+    `SEMGREP_APP_TOKEN=${semgrepToken}`,
+    `GITHUB_TOKEN=${githubToken}`,
+    `NODE_AUTH_TOKEN=${githubToken}`,
+    `AUTO_FIX=${autoFix ? 'true' : 'false'}`,
+    `REPORT_FORMAT=${reportFormat}`,
+    `REPORT_OUTPUT=${reportOutput ? `/output/${basename(reportOutput)}` : ''}`,
+    `VERBOSE=${verbose ? 'true' : 'false'}`,
+  ].join('\n') + '\n';
+
+  writeFileSync(envFilePath, envContent, { mode: 0o600 });
+  return envFilePath;
+}
+
+function cleanupEnvFile(envFilePath) {
+  try {
+    unlinkSync(envFilePath);
+  } catch {
+    // Best effort cleanup
+  }
 }
 
 // ── No-Docker Mode ──
@@ -285,21 +403,23 @@ async function run() {
   info(`🚀 Command: ${command}`);
   log('');
 
-  // Build docker run args
+  // Create secure env file (prevents token leakage via ps/docker inspect)
+  const envFile = createEnvFile();
+
+  // Build docker run args with security hardening
   const dockerArgs = [
     'run', '--rm',
+    // Security: drop all capabilities, prevent privilege escalation
+    '--cap-drop=ALL',
+    '--security-opt', 'no-new-privileges',
+    // Volumes
     '-v', `${targetPath}:/workspace`,
     // Cache volumes (persist between runs)
-    '-v', 'alpha-ci-npm-cache:/root/.npm',
-    '-v', 'alpha-ci-pip-cache:/root/.cache/pip',
-    '-v', 'alpha-ci-pnpm-cache:/root/.local/share/pnpm/store',
-    // Environment
-    '-e', `SEMGREP_APP_TOKEN=${semgrepToken}`,
-    '-e', `GITHUB_TOKEN=${githubToken}`,
-    '-e', `NODE_AUTH_TOKEN=${githubToken}`,
-    '-e', `AUTO_FIX=${autoFix ? 'true' : 'false'}`,
-    '-e', `REPORT_FORMAT=${reportFormat}`,
-    '-e', `REPORT_OUTPUT=${reportOutput}`,
+    '-v', 'alpha-ci-npm-cache:/home/alpha-ci/.npm',
+    '-v', 'alpha-ci-pip-cache:/home/alpha-ci/.cache/pip',
+    '-v', 'alpha-ci-pnpm-cache:/home/alpha-ci/.local/share/pnpm/store',
+    // Environment from secure file (tokens not visible in ps/inspect)
+    '--env-file', envFile,
   ];
 
   // Interactive mode for shell
@@ -307,16 +427,10 @@ async function run() {
     dockerArgs.push('-it');
   }
 
-  // Verbose
-  if (verbose) {
-    dockerArgs.push('-e', 'VERBOSE=true');
-  }
-
   // Report output: mount the output dir so the file is accessible from host
   if (reportOutput) {
-    const outputDir = resolve(targetPath, reportOutput, '..');
+    const outputDir = dirname(reportOutput);
     dockerArgs.push('-v', `${outputDir}:/output`);
-    dockerArgs.push('-e', `REPORT_OUTPUT=/output/${basename(reportOutput)}`);
   }
 
   dockerArgs.push(image, command);
@@ -328,13 +442,19 @@ async function run() {
   });
 
   child.on('close', (code) => {
+    cleanupEnvFile(envFile);
     process.exit(code || 0);
   });
 
   child.on('error', (err) => {
+    cleanupEnvFile(envFile);
     error(`❌ Erro ao executar Docker: ${err.message}`);
     process.exit(1);
   });
+
+  // Cleanup on unexpected exit
+  process.on('SIGINT', () => cleanupEnvFile(envFile));
+  process.on('SIGTERM', () => cleanupEnvFile(envFile));
 }
 
 run();
