@@ -369,7 +369,29 @@ generate_report() {
 sync_back_to_host() {
   if [ -d "/host_workspace" ]; then
     echo -e "\n  ${DIM}ℹ️  Sincronizando arquivos de volta para o host...${NC}"
-    tar --exclude='node_modules' --exclude='.git' -cf - -C /workspace . | tar -xf - -C /host_workspace
+    
+    # Redireciona os erros do tar para um arquivo para podermos analisá-los
+    set +e
+    tar --exclude='node_modules' --exclude='.git' -cf - -C /workspace . | tar --no-same-owner --no-same-permissions -xf - -C /host_workspace 2> /tmp/sync-errors.log
+    local tar_exit_code=$?
+    set -e
+
+    if [ -s /tmp/sync-errors.log ] || [ $tar_exit_code -ne 0 ]; then
+      echo -e "  ${YELLOW}⚠️  Aviso: Alguns arquivos não puderam ser sincronizados de volta para o host.${NC}"
+      
+      # Verifica se é erro de permissão negada (comum quando há arquivos do root de execuções antigas)
+      if grep -qi "permission denied" /tmp/sync-errors.log || grep -qi "operation not permitted" /tmp/sync-errors.log; then
+        echo -e "  ${DIM}Isso geralmente ocorre por dois motivos:${NC}"
+        echo -e "  ${DIM}1. Arquivos criados por versões antigas (root) bloqueando a sobrescrita.${NC}"
+        echo -e "  ${DIM}2. Restrições de permissão do Docker no Windows/Mac.${NC}"
+        echo -e "  ${CYAN}💡 Solução (no Linux/Mac): Rode 'sudo chown -R $(id -u):$(id -g) .' na pasta do projeto.${NC}"
+      else
+        # Mostra as primeiras 3 linhas do erro para debug
+        head -n 3 /tmp/sync-errors.log | while read -r line; do
+          echo -e "  ${DIM}> $line${NC}"
+        done
+      fi
+    fi
   fi
 }
 

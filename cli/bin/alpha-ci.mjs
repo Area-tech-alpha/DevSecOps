@@ -411,6 +411,15 @@ async function run() {
     image = pullOrBuild();
   } else {
     image = imageExists(IMAGE) ? IMAGE : IMAGE_LOCAL;
+    // Tenta atualizar a imagem silenciosamente se for a oficial
+    if (image === IMAGE && !rebuild) {
+      try {
+        log(`${c.dim}ℹ️  Verificando atualizações da imagem Docker...${c.reset}`);
+        execFileSync('docker', ['pull', IMAGE], { stdio: 'ignore' });
+      } catch {
+        // Ignora erro (offline ou timeout) e usa cache
+      }
+    }
   }
 
   const repoName = basename(targetPath);
@@ -422,6 +431,11 @@ async function run() {
   // Create secure env file (prevents token leakage via ps/docker inspect)
   const envFile = createEnvFile();
 
+  // No Windows, NÃO substituímos as barras (\\ por /) porque o docker.exe
+  // entende C:\ perfeitamente. Manter \ evita que o Git Bash confunda
+  // o argumento de volume com uma lista de caminhos POSIX.
+  const mountPath = targetPath;
+
   // Build docker run args with security hardening
   const dockerArgs = [
     'run', '--rm',
@@ -429,7 +443,7 @@ async function run() {
     '--cap-drop=ALL',
     '--security-opt', 'no-new-privileges',
     // Volumes (mounts to /host_workspace to allow isolation from host OS node_modules)
-    '-v', `${targetPath}:/host_workspace`,
+    '-v', `${mountPath}:/host_workspace`,
     // Cache volumes (persist between runs, bumped to v2 to fix root ownership from older versions)
     '-v', 'alpha-ci-npm-cache-v2:/home/alpha-ci/.npm',
     '-v', 'alpha-ci-pip-cache-v2:/home/alpha-ci/.cache/pip',
@@ -459,7 +473,12 @@ async function run() {
   // Spawn docker
   const child = spawn('docker', dockerArgs, {
     stdio: 'inherit',
-    env: { ...process.env, NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC },
+    env: { 
+      ...process.env, 
+      NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC,
+      MSYS_NO_PATHCONV: '1',   // Evita que o Git Bash corrompa paths Unix-like como /host_workspace
+      MSYS2_ARG_CONV_EXCL: '*' // Proteção extra para MSYS2
+    },
   });
 
   child.on('close', (code) => {
