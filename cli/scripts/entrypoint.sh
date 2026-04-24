@@ -31,7 +31,7 @@ export SCRIPTS_DIR CONFIG_DIR
 if [ -d "/host_workspace" ]; then
   echo -e "  ${DIM}ℹ️  Isolando workspace (evitando conflitos de SO Windows -> Linux)...${NC}"
   mkdir -p /workspace
-  tar --exclude='node_modules' --exclude='.git' --exclude='.next' --exclude='dist' --exclude='build' --exclude='venv' --exclude='.venv' -cf - -C /host_workspace . | tar -xf - -C /workspace
+  tar --exclude='node_modules' --exclude='.next' --exclude='dist' --exclude='build' --exclude='venv' --exclude='.venv' -cf - -C /host_workspace . | tar -xf - -C /workspace
   WORKSPACE="/workspace"
 else
   WORKSPACE="${WORKSPACE:-/workspace}"

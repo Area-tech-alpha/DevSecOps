@@ -36,6 +36,11 @@ if [ "$SKIP_GITLEAKS" = "false" ]; then
 
   # SECURITY: Use bash arrays to prevent word splitting / injection
   GITLEAKS_ARGS=("detect" "--source=." "--redact" "-v")
+  if [ ! -d ".git" ]; then
+    echo -e "  ${DIM}ℹ️  Diretório .git não encontrado, executando gitleaks com --no-git${NC}"
+    GITLEAKS_ARGS+=("--no-git")
+  fi
+
   if [ -n "$CONFIG_SEC" ] && [ -f "$CONFIG_SEC/gitleaks.toml" ]; then
     GITLEAKS_ARGS+=("--config=$CONFIG_SEC/gitleaks.toml")
   fi
