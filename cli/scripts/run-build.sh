@@ -21,6 +21,8 @@ if [ "$IS_NODE" = "true" ]; then
 
   if [ -f prisma/schema.prisma ]; then
     echo -e "${CYAN}⚡ Generating Prisma Client...${NC}"
+    # Workaround for Windows/Docker EPERM on copyfile: delete old client first
+    rm -rf node_modules/.prisma 2>/dev/null || true
     DATABASE_URL="${DATABASE_URL:-postgresql://ci:ci@localhost:5432/ci_dummy}" npx prisma generate
   fi
 
