@@ -6,6 +6,24 @@
 
 ## ⚡ Quick Start
 
+### Pré-requisito: Configurar acesso ao GitHub Packages (uma única vez)
+
+> GitHub Packages **exige autenticação** mesmo para leitura. Execute o setup abaixo **uma vez** na sua máquina:
+
+**Linux / Mac:**
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/Area-tech-alpha/DevSecOps/main/cli/setup-auth.sh)
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/Area-tech-alpha/DevSecOps/main/cli/setup-auth.ps1 | iex
+```
+
+> O script detecta automaticamente o token do GitHub CLI (`gh auth token`), variáveis de ambiente, ou pede interativamente.
+
+---
+
 ### Opção 1: NPX (recomendado)
 
 ```bash
@@ -81,10 +99,10 @@ alpha-ci lint --no-docker --fix
 --format <json|sarif|text>    Formato do relatório (default: text)
 --output <file>               Salva relatório em arquivo
 --rebuild                     Força rebuild da imagem Docker
---semgrep-token <token>       Token do Semgrep (opcional)
---github-token <token>        GitHub PAT (para packages privados)
 --version                     Mostra a versão
 ```
+
+> ⚠️ Tokens (`GITHUB_TOKEN`, `SEMGREP_APP_TOKEN`) devem ser passados **exclusivamente via variáveis de ambiente** por segurança. Flags `--semgrep-token` e `--github-token` foram removidos.
 
 ---
 
@@ -225,6 +243,7 @@ alpha-ci security lint
 
 | Problema | Solução |
 |----------|---------|
+| `E401 Unauthorized` (npx) | Rode o setup: `bash <(curl -fsSL .../setup-auth.sh)` |
 | `Docker not found` | Instale Docker ou use `--no-docker` |
 | `Permission denied` | Rode `chmod +x` no script ou use `sudo` |
 | `Image pull failed` | Faça login: `docker login ghcr.io -u USERNAME` |
@@ -264,7 +283,9 @@ cli/
 │   └── run-e2e.sh             # Playwright / Cypress
 ├── Dockerfile                 # Multi-stage (builder + runtime)
 ├── docker-compose.yml         # Services com cache volumes
-├── install.sh                 # One-liner installer
+├── install.sh                 # Installer completo (Docker + npm)
+├── setup-auth.sh              # Setup .npmrc (Linux/Mac)
+├── setup-auth.ps1             # Setup .npmrc (Windows/PowerShell)
 ├── package.json               # NPM package config
 └── README.md                  # Esta documentação
 ```
