@@ -429,8 +429,8 @@ async function run() {
     // Security: drop all capabilities, prevent privilege escalation
     '--cap-drop=ALL',
     '--security-opt', 'no-new-privileges',
-    // Volumes
-    '-v', `${targetPath}:/workspace`,
+    // Volumes (mounts to /host_workspace to allow isolation from host OS node_modules)
+    '-v', `${targetPath}:/host_workspace`,
     // Cache volumes (persist between runs)
     '-v', 'alpha-ci-npm-cache:/home/alpha-ci/.npm',
     '-v', 'alpha-ci-pip-cache:/home/alpha-ci/.cache/pip',

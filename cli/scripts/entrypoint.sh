@@ -22,7 +22,23 @@ DIM='\033[2m'
 NC='\033[0m'
 
 export RED GREEN YELLOW BLUE CYAN MAGENTA BOLD DIM NC
-export SCRIPTS_DIR CONFIG_DIR WORKSPACE
+export SCRIPTS_DIR CONFIG_DIR
+
+# ── Workspace Isolation (Cross-platform safe) ──
+# Se o projeto foi montado em /host_workspace, copiamos para /workspace
+# ignorando node_modules. Isso previne que binários nativos do Windows/Mac
+# quebrem o ambiente Linux do container.
+if [ -d "/host_workspace" ]; then
+  echo -e "  ${DIM}ℹ️  Isolando workspace (evitando conflitos de SO Windows -> Linux)...${NC}"
+  mkdir -p /workspace
+  tar --exclude='node_modules' --exclude='.git' --exclude='.next' --exclude='dist' --exclude='build' --exclude='venv' --exclude='.venv' -cf - -C /host_workspace . | tar -xf - -C /workspace
+  WORKSPACE="/workspace"
+else
+  WORKSPACE="${WORKSPACE:-/workspace}"
+fi
+export WORKSPACE
+
+cd "$WORKSPACE"
 
 # ── Proteção: .npmrc local do projeto não deve sobrescrever auth global ──
 # O npm resolve .npmrc na seguinte ordem: projeto local > user global > builtin
@@ -360,6 +376,13 @@ generate_report() {
   fi
 }
 
+sync_back_to_host() {
+  if [ -d "/host_workspace" ]; then
+    echo -e "\n  ${DIM}ℹ️  Sincronizando arquivos de volta para o host...${NC}"
+    tar --exclude='node_modules' --exclude='.git' -cf - -C /workspace . | tar -xf - -C /host_workspace
+  fi
+}
+
 # ── Dispatch ──
 case "$COMMAND" in
   all)
@@ -402,30 +425,35 @@ case "$COMMAND" in
     fi
 
     summary "$OVERALL" "${RESULTS[@]}"
+    sync_back_to_host
     ;;
 
   security)
     banner
     detect_project
     run_stage "Security Scan" "run-security.sh" "🔐"
+    sync_back_to_host
     ;;
 
   lint)
     banner
     detect_project
     run_stage "Lint" "run-lint.sh" "🔍"
+    sync_back_to_host
     ;;
 
   test)
     banner
     detect_project
     run_stage "Unit Tests" "run-test.sh" "🧪"
+    sync_back_to_host
     ;;
 
   build)
     banner
     detect_project
     run_stage "Build" "run-build.sh" "🏗"
+    sync_back_to_host
     ;;
 
   e2e)
