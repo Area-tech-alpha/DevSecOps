@@ -147,10 +147,8 @@ sync_configs() {
        fi \
     || { echo -e "  ${DIM}⚠ eslint.config.mjs — usando versão embarcada${NC}"; sync_ok=false; }
 
-  curl -fsSL --max-time 10 "$DEVSECOPS_RAW/lint/.eslintignore" -o "$CONFIG_DIR/lint/.eslintignore.tmp" 2>/dev/null \
-    && mv "$CONFIG_DIR/lint/.eslintignore.tmp" "$CONFIG_DIR/lint/.eslintignore" \
-    && echo -e "  ${GREEN}✓${NC} .eslintignore atualizado" \
-    || { echo -e "  ${DIM}⚠ .eslintignore — usando versão embarcada${NC}"; sync_ok=false; }
+  # NOTE: .eslintignore removido — ESLint 9 Flat Config ignora esse arquivo.
+  # Os padrões de ignore estão definidos no campo `ignores` do eslint.config.mjs.
 
   curl -fsSL --max-time 10 "$DEVSECOPS_RAW/lint/.editorconfig" -o "$CONFIG_DIR/lint/.editorconfig.tmp" 2>/dev/null \
     && mv "$CONFIG_DIR/lint/.editorconfig.tmp" "$CONFIG_DIR/lint/.editorconfig" \

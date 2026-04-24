@@ -56,7 +56,19 @@ if [ "$IS_NODE" = "true" ]; then
       for ws_dir in $ws_pattern; do
         if [ -d "$ws_dir" ] && [ -f "$ws_dir/package.json" ]; then
           echo -e "  ${DIM}→ $ws_dir${NC}"
-          (cd "$ws_dir" && [ ! -d node_modules ] && npm install --legacy-peer-deps 2>/dev/null) || true
+          (
+            cd "$ws_dir"
+            if [ ! -d node_modules ]; then
+              # Detecta o package manager do workspace (herda do root se não tiver lockfile próprio)
+              if [ -f pnpm-lock.yaml ] || [ -f ../pnpm-lock.yaml ]; then
+                pnpm install --frozen-lockfile 2>/dev/null || pnpm install 2>/dev/null
+              elif [ -f yarn.lock ] || [ -f ../yarn.lock ]; then
+                yarn install --frozen-lockfile 2>/dev/null || yarn install 2>/dev/null
+              else
+                npm install --legacy-peer-deps 2>/dev/null
+              fi
+            fi
+          ) || true
         fi
       done
     done
@@ -86,14 +98,23 @@ if [ "$IS_NODE" = "true" ]; then
   fi
 
   if [ ! -f "$ESLINT_CONFIG" ]; then
-    # Tenta usar config do projeto
-    if [ -f "eslint.config.mjs" ] || [ -f "eslint.config.js" ] || [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ]; then
+    # Flat Config: apenas eslint.config.mjs / eslint.config.js são suportados
+    if [ -f "eslint.config.mjs" ] || [ -f "eslint.config.js" ]; then
       ESLINT_CONFIG=""
-      echo -e "  ${DIM}Usando config ESLint do projeto${NC}"
+      echo -e "  ${DIM}Usando config ESLint do projeto (flat config)${NC}"
+    elif [ -f ".eslintrc.json" ] || [ -f ".eslintrc.js" ] || [ -f ".eslintrc.yml" ]; then
+      # Legacy config (.eslintrc.*) não funciona com ESLINT_USE_FLAT_CONFIG=true
+      # Desativa flat config para evitar crash do ESLint 9
+      ESLINT_CONFIG=""
+      unset ESLINT_USE_FLAT_CONFIG
+      echo -e "  ${YELLOW}⚠️ Config ESLint legado detectado (.eslintrc.*) — desativando Flat Config${NC}"
     fi
   fi
 
   if [ -n "$ESLINT_BIN" ]; then
+    # Cleanup de output anterior (evita exibir resultado stale de outra execução)
+    rm -f /tmp/eslint-output.log
+
     set +e
 
     # SECURITY: Use bash array for arguments (prevents word splitting / injection)
@@ -102,10 +123,8 @@ if [ "$IS_NODE" = "true" ]; then
     ESLINT_ARGS+=("--no-error-on-unmatched-pattern")
     [ -n "$FIX_FLAG" ] && ESLINT_ARGS+=("$FIX_FLAG")
 
-    # Mute warnings to prevent output pollution unless VERBOSE is true
-    if [ "${VERBOSE:-false}" != "true" ]; then
-      ESLINT_ARGS+=("--quiet")
-    fi
+    # Consistente com alpha-lint.yml: mostra warnings para o dev
+    # corrigir localmente antes de pushar ao CI
 
     # Run ESLint and capture output
     "$ESLINT_BIN" "${ESLINT_ARGS[@]}" > /tmp/eslint-output.log 2>&1

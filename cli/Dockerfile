@@ -113,7 +113,7 @@ COPY --from=builder /tools/golangci-lint /usr/local/bin/golangci-lint
 COPY security/gitleaks.toml     /opt/alpha-ci/config/security/gitleaks.toml
 COPY security/osv-scanner.toml  /opt/alpha-ci/config/security/osv-scanner.toml
 COPY lint/eslint.config.mjs     /opt/alpha-ci/config/lint/eslint.config.mjs
-COPY lint/.eslintignore         /opt/alpha-ci/config/lint/.eslintignore
+# NOTE: .eslintignore removido — ESLint 9 Flat Config usa apenas o campo `ignores` do eslint.config.mjs
 COPY lint/.editorconfig         /opt/alpha-ci/config/lint/.editorconfig
 
 # ── Install isolated ESLint 9 toolchain ──

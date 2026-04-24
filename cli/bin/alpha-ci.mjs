@@ -21,9 +21,11 @@ const c = {
   bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m',
 };
 
+/* eslint-disable no-console -- CLI tool: console is the primary output interface */
 const log = (msg) => console.log(msg);
 const error = (msg) => console.error(`${c.red}${msg}${c.reset}`);
 const info = (msg) => console.log(`${c.cyan}${msg}${c.reset}`);
+/* eslint-enable no-console */
 
 // ── Allowed commands (whitelist) ──
 const ALLOWED_COMMANDS = new Set([
@@ -95,9 +97,11 @@ for (let i = 1; i < args.length; i++) {
       error(`   export GITHUB_TOKEN=<token>`);
       i++; // skip the value
       process.exit(1);
+      break; // eslint: no-fallthrough (process.exit never returns, but ESLint can't infer that)
     case '--version':
       log(`alpha-ci v${VERSION}`);
       process.exit(0);
+      break;
   }
 }
 
