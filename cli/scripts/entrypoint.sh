@@ -40,27 +40,22 @@ export WORKSPACE
 
 cd "$WORKSPACE"
 
-# ── Proteção: .npmrc local do projeto não deve sobrescrever auth global ──
-# O npm resolve .npmrc na seguinte ordem: projeto local > user global > builtin
-# Se o projeto do consumidor tem um .npmrc com registry config diferente, ele
-# pode bloquear o acesso ao GitHub Packages. Neutralizamos para evitar conflitos.
-NPMRC_LOCAL_BACKUP=""
+# ── Proteção Extrema: Forçar .npmrc global e aniquilar o local ──
+# Se o projeto tiver um .npmrc local, ele pode gerar erros de EACCES
+# ou conflitos de registry. Como estamos em um workspace isolado (/workspace),
+# podemos apagar o .npmrc local sem afetar o host!
 if [ -f "$WORKSPACE/.npmrc" ]; then
-  if grep -q '@area-tech-alpha' "$WORKSPACE/.npmrc" 2>/dev/null || \
-     grep -q 'npm.pkg.github.com' "$WORKSPACE/.npmrc" 2>/dev/null; then
-    echo -e "  ${DIM}ℹ️  .npmrc local detectado com config @area-tech-alpha — usando global${NC}"
-    mv "$WORKSPACE/.npmrc" "$WORKSPACE/.npmrc.alpha-ci-backup"
-    NPMRC_LOCAL_BACKUP="$WORKSPACE/.npmrc.alpha-ci-backup"
-  fi
+  echo -e "  ${DIM}ℹ️  Apagando .npmrc local do workspace isolado para evitar conflitos de permissão...${NC}"
+  rm -f "$WORKSPACE/.npmrc"
 fi
 
-# Cleanup: restaurar .npmrc ao sair
-cleanup_npmrc() {
-  if [ -n "$NPMRC_LOCAL_BACKUP" ] && [ -f "$NPMRC_LOCAL_BACKUP" ]; then
-    mv "$NPMRC_LOCAL_BACKUP" "$WORKSPACE/.npmrc"
-  fi
-}
-trap cleanup_npmrc EXIT
+# Gerar o .npmrc global do container (usa o token seguro passado por env)
+echo -e "  ${DIM}ℹ️  Configurando .npmrc global do container...${NC}"
+echo "@area-tech-alpha:registry=https://npm.pkg.github.com" > /home/alpha-ci/.npmrc
+if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
+  echo "//npm.pkg.github.com/:_authToken=\${NODE_AUTH_TOKEN}" >> /home/alpha-ci/.npmrc
+fi
+export NPM_CONFIG_USERCONFIG=/home/alpha-ci/.npmrc
 
 banner() {
   echo ""

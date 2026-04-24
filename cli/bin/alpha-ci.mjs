@@ -314,7 +314,6 @@ function createEnvFile() {
     `REPORT_FORMAT=${reportFormat}`,
     `REPORT_OUTPUT=${reportOutput ? `/output/${basename(reportOutput)}` : ''}`,
     `VERBOSE=${verbose ? 'true' : 'false'}`,
-    `NPM_CONFIG_USERCONFIG=${GLOBAL_NPMRC}`,
   ].join('\n') + '\n';
 
   writeFileSync(envFilePath, envContent, { mode: 0o600 });
