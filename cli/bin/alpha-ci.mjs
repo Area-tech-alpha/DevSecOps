@@ -431,10 +431,10 @@ async function run() {
     '--security-opt', 'no-new-privileges',
     // Volumes (mounts to /host_workspace to allow isolation from host OS node_modules)
     '-v', `${targetPath}:/host_workspace`,
-    // Cache volumes (persist between runs)
-    '-v', 'alpha-ci-npm-cache:/home/alpha-ci/.npm',
-    '-v', 'alpha-ci-pip-cache:/home/alpha-ci/.cache/pip',
-    '-v', 'alpha-ci-pnpm-cache:/home/alpha-ci/.local/share/pnpm/store',
+    // Cache volumes (persist between runs, bumped to v2 to fix root ownership from older versions)
+    '-v', 'alpha-ci-npm-cache-v2:/home/alpha-ci/.npm',
+    '-v', 'alpha-ci-pip-cache-v2:/home/alpha-ci/.cache/pip',
+    '-v', 'alpha-ci-pnpm-cache-v2:/home/alpha-ci/.local/share/pnpm/store',
     // Environment from secure file (tokens not visible in ps/inspect)
     '--env-file', envFile,
   ];
