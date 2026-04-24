@@ -37,7 +37,14 @@ if [ "$HAS_NODE_TEST" = "true" ]; then
     echo -e "${CYAN}⚡ Generating Prisma Client...${NC}"
     # Workaround for Windows/Docker EPERM on copyfile: delete old client first
     rm -rf node_modules/.prisma 2>/dev/null || true
+    set +e
     DATABASE_URL="${DATABASE_URL:-postgresql://ci:ci@localhost:5432/ci_dummy}" npx prisma generate
+    PRISMA_EXIT=$?
+    set -e
+    if [ $PRISMA_EXIT -ne 0 ]; then
+      echo -e "${YELLOW}⚠ Falha no Prisma local (provável erro de cross-platform). Tentando npx -y prisma@latest...${NC}"
+      DATABASE_URL="${DATABASE_URL:-postgresql://ci:ci@localhost:5432/ci_dummy}" npx -y prisma@latest generate
+    fi
   fi
 
   # Determina flags baseado no runner
