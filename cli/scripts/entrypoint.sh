@@ -24,6 +24,28 @@ NC='\033[0m'
 export RED GREEN YELLOW BLUE CYAN MAGENTA BOLD DIM NC
 export SCRIPTS_DIR CONFIG_DIR WORKSPACE
 
+# ── Proteção: .npmrc local do projeto não deve sobrescrever auth global ──
+# O npm resolve .npmrc na seguinte ordem: projeto local > user global > builtin
+# Se o projeto do consumidor tem um .npmrc com registry config diferente, ele
+# pode bloquear o acesso ao GitHub Packages. Neutralizamos para evitar conflitos.
+NPMRC_LOCAL_BACKUP=""
+if [ -f "$WORKSPACE/.npmrc" ]; then
+  if grep -q '@area-tech-alpha' "$WORKSPACE/.npmrc" 2>/dev/null || \
+     grep -q 'npm.pkg.github.com' "$WORKSPACE/.npmrc" 2>/dev/null; then
+    echo -e "  ${DIM}ℹ️  .npmrc local detectado com config @area-tech-alpha — usando global${NC}"
+    mv "$WORKSPACE/.npmrc" "$WORKSPACE/.npmrc.alpha-ci-backup"
+    NPMRC_LOCAL_BACKUP="$WORKSPACE/.npmrc.alpha-ci-backup"
+  fi
+fi
+
+# Cleanup: restaurar .npmrc ao sair
+cleanup_npmrc() {
+  if [ -n "$NPMRC_LOCAL_BACKUP" ] && [ -f "$NPMRC_LOCAL_BACKUP" ]; then
+    mv "$NPMRC_LOCAL_BACKUP" "$WORKSPACE/.npmrc"
+  fi
+}
+trap cleanup_npmrc EXIT
+
 banner() {
   echo ""
   echo -e "${MAGENTA}${BOLD}"

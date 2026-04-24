@@ -14,6 +14,17 @@ const IMAGE = 'ghcr.io/area-tech-alpha/alpha-ci:latest';
 const IMAGE_LOCAL = 'alpha-ci:latest';
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8')).version;
 
+// ── Resolve global .npmrc path (never use local .npmrc from consumer projects) ──
+import { homedir } from 'node:os';
+function getGlobalNpmrc() {
+  try {
+    return execFileSync('npm', ['config', 'get', 'userconfig'], { encoding: 'utf-8' }).trim();
+  } catch {
+    return resolve(homedir(), '.npmrc');
+  }
+}
+const GLOBAL_NPMRC = getGlobalNpmrc();
+
 // ── Colors ──
 const c = {
   red: '\x1b[31m', green: '\x1b[32m', yellow: '\x1b[33m',
@@ -303,6 +314,7 @@ function createEnvFile() {
     `REPORT_FORMAT=${reportFormat}`,
     `REPORT_OUTPUT=${reportOutput ? `/output/${basename(reportOutput)}` : ''}`,
     `VERBOSE=${verbose ? 'true' : 'false'}`,
+    `NPM_CONFIG_USERCONFIG=${GLOBAL_NPMRC}`,
   ].join('\n') + '\n';
 
   writeFileSync(envFilePath, envContent, { mode: 0o600 });
@@ -364,6 +376,7 @@ function runNoDocker() {
     AUTO_FIX: autoFix ? 'true' : 'false',
     REPORT_FORMAT: reportFormat,
     REPORT_OUTPUT: reportOutput,
+    NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC,
   };
 
   const child = spawn('bash', [localRunner, command], {
@@ -442,7 +455,7 @@ async function run() {
   // Spawn docker
   const child = spawn('docker', dockerArgs, {
     stdio: 'inherit',
-    env: { ...process.env },
+    env: { ...process.env, NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC },
   });
 
   child.on('close', (code) => {
