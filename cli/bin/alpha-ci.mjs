@@ -438,6 +438,11 @@ async function run() {
     '--env-file', envFile,
   ];
 
+  // Mount global .npmrc if it exists so container has host's auth
+  if (existsSync(GLOBAL_NPMRC)) {
+    dockerArgs.push('-v', `${GLOBAL_NPMRC}:/home/alpha-ci/.npmrc:ro`);
+  }
+
   // Interactive mode for shell
   if (command === 'shell') {
     dockerArgs.push('-it');

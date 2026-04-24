@@ -49,12 +49,7 @@ if [ -f "$WORKSPACE/.npmrc" ]; then
   rm -f "$WORKSPACE/.npmrc"
 fi
 
-# Gerar o .npmrc global do container (usa o token seguro passado por env)
-echo -e "  ${DIM}ℹ️  Configurando .npmrc global do container...${NC}"
-echo "@area-tech-alpha:registry=https://npm.pkg.github.com" > /home/alpha-ci/.npmrc
-if [ -n "${NODE_AUTH_TOKEN:-}" ]; then
-  echo "//npm.pkg.github.com/:_authToken=\${NODE_AUTH_TOKEN}" >> /home/alpha-ci/.npmrc
-fi
+# O host's global .npmrc já foi montado como read-only em /home/alpha-ci/.npmrc
 export NPM_CONFIG_USERCONFIG=/home/alpha-ci/.npmrc
 
 banner() {
