@@ -63,23 +63,9 @@ if (-not $ghToken) {
 }
 
 # ── Configure .npmrc ──
-if (-not (Test-Path $npmrcFile)) { New-Item -Path $npmrcFile -ItemType File | Out-Null }
-
-$npmrcContent = Get-Content $npmrcFile -Raw -ErrorAction SilentlyContinue
-if (-not $npmrcContent) { $npmrcContent = "" }
-
-# Registry scope
-if ($npmrcContent -notmatch '@area-tech-alpha:registry=https://npm.pkg.github.com') {
-    Add-Content -Path $npmrcFile -Value '@area-tech-alpha:registry=https://npm.pkg.github.com'
-}
-
-# Auth token
-if ($npmrcContent -match '//npm\.pkg\.github\.com/:_authToken=') {
-    (Get-Content $npmrcFile) -replace '//npm\.pkg\.github\.com/:_authToken=.*', "//npm.pkg.github.com/:_authToken=$ghToken" |
-        Set-Content $npmrcFile
-} else {
-    Add-Content -Path $npmrcFile -Value "//npm.pkg.github.com/:_authToken=$ghToken"
-}
+Write-Host "  Atualizando configurações do npm..." -ForegroundColor Cyan
+npm config set @area-tech-alpha:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken $ghToken
 
 Write-Host ""
 Write-Host "  ✅ .npmrc configurado com sucesso!" -ForegroundColor Green

@@ -79,20 +79,9 @@ if [[ ! "$GH_TOKEN" =~ ^(ghp_|gho_|github_pat_) ]]; then
 fi
 
 # ── Configure .npmrc ──
-touch "$NPMRC_FILE"
-
-# Registry scope
-if ! grep -q '@area-tech-alpha:registry=https://npm.pkg.github.com' "$NPMRC_FILE" 2>/dev/null; then
-  echo '@area-tech-alpha:registry=https://npm.pkg.github.com' >> "$NPMRC_FILE"
-fi
-
-# Auth token
-if ! grep -q '//npm.pkg.github.com/:_authToken=' "$NPMRC_FILE" 2>/dev/null; then
-  echo "//npm.pkg.github.com/:_authToken=$GH_TOKEN" >> "$NPMRC_FILE"
-else
-  # Update existing token
-  sed -i "s|//npm.pkg.github.com/:_authToken=.*|//npm.pkg.github.com/:_authToken=$GH_TOKEN|" "$NPMRC_FILE"
-fi
+echo -e "  ${CYAN}Atualizando configurações do npm...${NC}"
+npm config set @area-tech-alpha:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken "$GH_TOKEN"
 
 echo ""
 echo -e "  ${GREEN}✅ .npmrc configurado com sucesso!${NC}"
