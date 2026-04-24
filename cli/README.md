@@ -24,24 +24,30 @@ irm https://raw.githubusercontent.com/Area-tech-alpha/DevSecOps/main/cli/setup-a
 
 ---
 
-### Opção 1: NPX (recomendado)
+### Opção 1: Instalação Global (Recomendado)
 
-```bash
-# Instale ou rode direto:
-npx @area-tech-alpha/alpha-ci security
-
-# Pipeline completo:
-npx @area-tech-alpha/alpha-ci all
-
-# Em outro repositório:
-npx @area-tech-alpha/alpha-ci all --path ../meu-projeto
-```
-
-### Opção 2: Instalação global
+Evita o erro `403 Forbidden` do `npx` quando o projeto possui um `.npmrc` local.
 
 ```bash
 npm install -g @area-tech-alpha/alpha-ci
+
+# Scan de segurança no repo atual:
 alpha-ci security
+
+# Pipeline completo:
+alpha-ci all
+
+# Em outro repositório:
+alpha-ci all --path ../meu-projeto
+```
+
+### Opção 2: NPX (Requer token exportado)
+
+Se usar `npx` dentro de um repositório que tenha `.npmrc` com `_authToken=${NODE_AUTH_TOKEN}`, você obrigatoriamente precisa ter a variável exportada no terminal, senão o `npx` retornará 403 antes mesmo de executar.
+
+```bash
+export NODE_AUTH_TOKEN=$(gh auth token)
+npx @area-tech-alpha/alpha-ci all
 ```
 
 ### Opção 3: One-liner
