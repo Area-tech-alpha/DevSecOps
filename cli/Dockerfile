@@ -133,6 +133,10 @@ RUN mkdir -p /opt/alpha-ci/config/lint \
 COPY cli/scripts/ /opt/alpha-ci/scripts/
 RUN chmod +x /opt/alpha-ci/scripts/*.sh
 
+# ── Copy hook templates and installer ──
+COPY cli/hooks/ /opt/alpha-ci/hooks/
+RUN chmod +x /opt/alpha-ci/hooks/*.sh || true
+
 # ── Security: Create non-root user (use UID 1000 to match host and avoid EACCES) ──
 RUN usermod -l alpha-ci ubuntu && groupmod -n alpha-ci ubuntu \
     && usermod -d /home/alpha-ci -m alpha-ci \

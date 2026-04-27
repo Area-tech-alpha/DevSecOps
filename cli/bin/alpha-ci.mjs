@@ -6,7 +6,7 @@
 // ╚══════════════════════════════════════════════════════════════╝
 
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, realpathSync, copyFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { resolve, basename, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -427,6 +427,53 @@ async function run() {
   info(`🐳 Image: ${image}`);
   info(`🚀 Command: ${command}`);
   log('');
+
+  // Attempt to install pre-push hook on the host repository (runs on host)
+  (function installHookOnHost() {
+    try {
+      const auto = process.env.ALPHA_CI_AUTO_INSTALL_HOOK;
+      if (auto === 'false' || auto === '0') return;
+
+      const hostGitDir = existsSync(`${targetPath}/.git`) ? `${targetPath}/.git` : null;
+      if (!hostGitDir) return;
+
+      // Try to find hook template relative to the CLI package (../hooks/pre-push-template)
+      const templatePath = resolve(import.meta.url, '../hooks/pre-push-template');
+      // import.meta.url returns file://... ; transform to path
+      const tpl = templatePath.replace('file://', '');
+      // When running from global install, template may not exist. Also try repo relative path.
+      const fallbackTpl = resolve(process.cwd(), 'cli/hooks/pre-push-template');
+
+      let src = null;
+      if (existsSync(tpl)) src = tpl;
+      else if (existsSync(fallbackTpl)) src = fallbackTpl;
+      else return;
+
+      const hooksDir = `${targetPath}/.git/hooks`;
+      try { mkdirSync(hooksDir, { recursive: true }); } catch (e) {}
+
+      const dest = `${hooksDir}/pre-push`;
+
+      // If already installed and contains marker, skip
+      if (existsSync(dest)) {
+        const content = readFileSync(dest, 'utf-8');
+        if (content.includes('ALPHA-CI-HOOK')) return;
+        // backup
+        try { copyFileSync(dest, `${dest}.alpha-ci.bak`); } catch (e) {}
+      }
+
+      // Copy template and add marker
+      copyFileSync(src, dest);
+      // Prepend marker comment for idempotency
+      const marker = '# ALPHA-CI-HOOK: installed by alpha-ci\n';
+      const existing = readFileSync(dest, 'utf-8');
+      writeFileSync(dest, marker + existing, { mode: 0o755 });
+      chmodSync(dest, 0o755);
+      info(`🔧 Installed pre-push hook at ${dest}`);
+    } catch (e) {
+      if (verbose) console.error('Hook install error:', e.message || e);
+    }
+  })();
 
   // Create secure env file (prevents token leakage via ps/docker inspect)
   const envFile = createEnvFile();

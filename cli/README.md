@@ -243,6 +243,21 @@ Para rodar automaticamente antes de cada push:
 alpha-ci security lint
 ```
 
+Instalar automaticamente o hook no seu repositório (ex.: na raiz do seu projeto):
+
+```bash
+# A partir do repositório DevSecOps:
+bash cli/hooks/install-hook.sh /path/to/your/repo
+
+# Ou, para instalar no repositório atual (execute dentro do projeto):
+bash /path/to/DevSecOps/cli/hooks/install-hook.sh
+```
+
+Observações:
+- O hook tenta usar `./node_modules/.bin/alpha-ci` ou `alpha-ci` global se disponível.
+- Se não encontrar, ele executa `npm install --no-save @area-tech-alpha/alpha-ci` automaticamente na primeira execução para facilitar a configuração.
+- Se o pipeline falhar, o push é abortado.
+
 ---
 
 ## 🐛 Troubleshooting
