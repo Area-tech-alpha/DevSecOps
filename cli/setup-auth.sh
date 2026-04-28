@@ -249,18 +249,30 @@ fi
 #  DONE
 # ══════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════
+#  STEP 4: Instalação Global
+# ══════════════════════════════════════════════════
+
+echo -e "  ${CYAN}── Step 4/4: Instalando Alpha CI globalmente ──${NC}"
 echo ""
+
+if npm install -g @area-tech-alpha/alpha-ci; then
+  echo -e "  ${GREEN}✓${NC} Alpha CI instalado com sucesso!"
+else
+  echo -e "  ${YELLOW}⚠${NC} Falha na instalação global. Tente rodar manually:${NC}"
+  echo -e "    ${CYAN}sudo npm install -g @area-tech-alpha/alpha-ci${NC}"
+fi
+
+echo ""
+
+# ══════════════════════════════════════════════════
+#  DONE
+# ══════════════════════════════════════════════════
+
 echo -e "  ${GREEN}══════════════════════════════════════════════${NC}"
 echo -e "  ${GREEN}✅ Setup concluído com sucesso!${NC}"
 echo -e "  ${GREEN}══════════════════════════════════════════════${NC}"
 echo ""
-echo -e "  ${BOLD}Agora você pode usar:${NC}"
-echo -e "    ${CYAN}npx @area-tech-alpha/alpha-ci all${NC}        # Pipeline completo"
-echo -e "    ${CYAN}npx @area-tech-alpha/alpha-ci security${NC}   # Scan de segurança"
-echo -e "    ${CYAN}npx @area-tech-alpha/alpha-ci lint${NC}       # Linting"
-echo -e "    ${CYAN}npx @area-tech-alpha/alpha-ci lint --fix${NC} # Auto-fix"
-echo ""
-echo -e "  ${DIM}Ou instalar globalmente:${NC}"
-echo -e "    ${CYAN}npm install -g @area-tech-alpha/alpha-ci${NC}"
+echo -e "  ${BOLD}Agora você pode usar em qualquer projeto:${NC}"
 echo -e "    ${CYAN}alpha-ci all${NC}"
 echo ""

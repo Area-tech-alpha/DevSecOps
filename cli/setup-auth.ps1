@@ -261,18 +261,33 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 #  DONE
 # ══════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════
+#  STEP 4: Instalação Global
+# ══════════════════════════════════════════════════
+
+Write-Host "  ── Step 4/4: Instalando Alpha CI globalmente ──" -ForegroundColor Cyan
+Write-Host ""
+
+npm install -g @area-tech-alpha/alpha-ci
+
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "  ✓ Alpha CI instalado com sucesso!" -ForegroundColor Green
+} else {
+    Write-Host "  ⚠ Falha na instalação global. Tente rodar manually:" -ForegroundColor Yellow
+    Write-Host "    npm install -g @area-tech-alpha/alpha-ci" -ForegroundColor Cyan
+}
+
+Write-Host ""
+
+# ══════════════════════════════════════════════════
+#  DONE
+# ══════════════════════════════════════════════════
+
 Write-Host ""
 Write-Host "  ══════════════════════════════════════════════" -ForegroundColor Green
 Write-Host "  ✅ Setup concluído com sucesso!" -ForegroundColor Green
 Write-Host "  ══════════════════════════════════════════════" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Agora você pode usar:" -ForegroundColor White
-Write-Host "    npx @area-tech-alpha/alpha-ci all        # Pipeline completo" -ForegroundColor Cyan
-Write-Host "    npx @area-tech-alpha/alpha-ci security   # Scan de segurança" -ForegroundColor Cyan
-Write-Host "    npx @area-tech-alpha/alpha-ci lint       # Linting" -ForegroundColor Cyan
-Write-Host "    npx @area-tech-alpha/alpha-ci lint --fix # Auto-fix" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "  Ou instalar globalmente:" -ForegroundColor DarkGray
-Write-Host "    npm install -g @area-tech-alpha/alpha-ci" -ForegroundColor Cyan
+Write-Host "  Agora você pode usar em qualquer projeto:" -ForegroundColor White
 Write-Host "    alpha-ci all" -ForegroundColor Cyan
 Write-Host ""
