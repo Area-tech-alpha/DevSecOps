@@ -173,9 +173,13 @@ fi
 
 # Configura via npm config (grava no .npmrc global automaticamente)
 echo -e "  ${CYAN}⚙️  Configurando registry e token...${NC}"
-npm config set @area-tech-alpha:registry https://npm.pkg.github.com 2>/dev/null
-npm config set "//npm.pkg.github.com/:_authToken" "$GH_TOKEN" 2>/dev/null
-npm config set always-auth true 2>/dev/null
+
+# Tenta configurar e mostra o erro real se falhar
+npm config set @area-tech-alpha:registry https://npm.pkg.github.com
+npm config set "//npm.pkg.github.com/:_authToken" "$GH_TOKEN"
+
+# Injeta always-auth diretamente no arquivo (evita erro no npm v9+)
+echo "always-auth=true" >> "$NPMRC_GLOBAL"
 
 echo -e "  ${GREEN}✓${NC} Registry @area-tech-alpha configurado"
 echo -e "  ${GREEN}✓${NC} Auth token injetado e higienizado"

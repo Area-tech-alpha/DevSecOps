@@ -181,9 +181,11 @@ try {
 
 # Configura via npm config (grava no .npmrc global automaticamente)
 Write-Host "  ⚙️  Configurando registry e token..." -ForegroundColor Cyan
-npm config set @area-tech-alpha:registry https://npm.pkg.github.com 2>$null
-npm config set //npm.pkg.github.com/:_authToken $ghToken 2>$null
-npm config set always-auth true 2>$null
+npm config set @area-tech-alpha:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken $ghToken
+
+# Injeta always-auth diretamente no arquivo (evita erro no npm v9+)
+Add-Content -Path $npmrcGlobal -Value "always-auth=true"
 
 Write-Host "  ✓ Registry @area-tech-alpha configurado" -ForegroundColor Green
 Write-Host "  ✓ Auth token injetado e higienizado" -ForegroundColor Green
