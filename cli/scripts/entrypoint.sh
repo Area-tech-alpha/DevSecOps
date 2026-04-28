@@ -439,34 +439,43 @@ case "$COMMAND" in
 
     summary "$OVERALL" "${RESULTS[@]}"
     sync_back_to_host
+    exit "$OVERALL"
     ;;
 
   security)
     banner
     detect_project
     run_stage "Security Scan" "run-security.sh" "🔐"
+    EXIT_CODE=$?
     sync_back_to_host
+    exit $EXIT_CODE
     ;;
 
   lint)
     banner
     detect_project
     run_stage "Lint" "run-lint.sh" "🔍"
+    EXIT_CODE=$?
     sync_back_to_host
+    exit $EXIT_CODE
     ;;
 
   test)
     banner
     detect_project
     run_stage "Unit Tests" "run-test.sh" "🧪"
+    EXIT_CODE=$?
     sync_back_to_host
+    exit $EXIT_CODE
     ;;
 
   build)
     banner
     detect_project
     run_stage "Build" "run-build.sh" "🏗"
+    EXIT_CODE=$?
     sync_back_to_host
+    exit $EXIT_CODE
     ;;
 
   e2e)

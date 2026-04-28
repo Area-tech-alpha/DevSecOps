@@ -254,14 +254,22 @@ targetPath = validateTargetPath(targetPath);
 
     if (existsSync(dest)) {
       const content = readFileSync(dest, 'utf-8');
-      if (content.includes('ALPHA-CI-HOOK')) return;
+      // If our marker is there AND shebang is at line 1, we are good.
+      if (content.includes('ALPHA-CI-HOOK') && content.startsWith('#!')) return;
       try { copyFileSync(dest, `${dest}.alpha-ci.bak`); } catch (e) {}
     }
 
     copyFileSync(src, dest);
     const marker = '# ALPHA-CI-HOOK: installed by alpha-ci\n';
-    const existing = readFileSync(dest, 'utf-8');
-    writeFileSync(dest, marker + existing, { mode: 0o755 });
+    let content = readFileSync(dest, 'utf-8');
+    if (content.startsWith('#!')) {
+      const lines = content.split('\n');
+      lines.splice(1, 0, marker.trim());
+      content = lines.join('\n');
+    } else {
+      content = marker + content;
+    }
+    writeFileSync(dest, content, { mode: 0o755 });
     chmodSync(dest, 0o755);
     info(`🔧 Installed pre-push hook at ${dest}`);
   } catch (e) {
