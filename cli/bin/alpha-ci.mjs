@@ -450,8 +450,32 @@ function runNoDocker() {
   });
 }
 
+// ── Check for NPM Updates ──
+async function checkForUpdates() {
+  try {
+    // Silent check: get latest version from registry
+    const latest = execFileSync('npm', ['view', '@area-tech-alpha/alpha-ci', 'version'], { 
+      encoding: 'utf-8', 
+      timeout: 2000,
+      env: { ...process.env, NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC }
+    }).trim();
+
+    if (latest && latest !== VERSION) {
+      log(`${c.yellow}${c.bold}🔔 Nova versão disponível: ${latest} (atual: ${VERSION})${c.reset}`);
+      log(`${c.dim}   Execute: npm install -g @area-tech-alpha/alpha-ci${c.reset}\n`);
+    }
+  } catch (e) {
+    // Ignore update check failures (offline/timeout)
+  }
+}
+
 // ── Run ──
 async function run() {
+  // Check for updates in the background (don't block start)
+  if (!args.includes('--version')) {
+    checkForUpdates();
+  }
+
   // --no-docker mode
   if (noDocker) {
     return runNoDocker();
@@ -474,9 +498,9 @@ async function run() {
     if (image === IMAGE && !rebuild) {
       try {
         log(`${c.dim}ℹ️  Verificando atualizações da imagem Docker...${c.reset}`);
-        execFileSync('docker', ['pull', IMAGE], { stdio: 'ignore' });
-      } catch {
-        // Ignora erro (offline ou timeout) e usa cache
+        execFileSync('docker', ['pull', IMAGE], { stdio: 'ignore', timeout: 15000 });
+      } catch (e) {
+        // Ignora erro (offline, timeout ou interrupção) e usa cache
       }
     }
   }
