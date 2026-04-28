@@ -69,7 +69,8 @@ if (-not $ghToken) {
 if (-not $ghToken -and (Test-Path $npmrcGlobal)) {
     $match = Select-String -Path $npmrcGlobal -Pattern '//npm\.pkg\.github\.com/:_authToken=(.+)' -ErrorAction SilentlyContinue
     if ($match) {
-        $ghToken = $match.Matches[0].Groups[1].Value.Trim() -replace '[\r\n\s\t]', ''
+        # Limpeza nuclear: remove TUDO que não for alfanumérico ou os separadores permitidos
+        $ghToken = $match.Matches[0].Groups[1].Value -replace '[^a-zA-Z0-9_.-]', ''
         Write-Host "  ✓ Token encontrado no .npmrc global" -ForegroundColor Green
     }
 }
@@ -89,7 +90,7 @@ if (-not $ghToken) {
         Write-Host "`n  ❌ Nenhum token fornecido. Abortando." -ForegroundColor Red
         exit 1
     }
-    $ghToken = $ghToken.Trim() -replace '[\r\n\s\t]', ''
+    $ghToken = $ghToken -replace '[^a-zA-Z0-9_.-]', ''
 }
 
 # ── Validação Ativa do Token ──
