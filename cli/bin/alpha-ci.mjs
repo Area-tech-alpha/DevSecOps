@@ -5,7 +5,7 @@
 // ║  Permite: npx @area-tech-alpha/alpha-ci security             ║
 // ╚══════════════════════════════════════════════════════════════╝
 
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, realpathSync, copyFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { resolve, basename, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -450,22 +450,47 @@ function runNoDocker() {
   });
 }
 
-// ── Check for NPM Updates ──
+// ── Check and Auto-Update NPM Package ──
 async function checkForUpdates() {
   try {
+    const autoUpdate = process.env.ALPHA_CI_AUTO_UPDATE !== 'false';
+    
     // Silent check: get latest version from registry
     const latest = execFileSync('npm', ['view', '@area-tech-alpha/alpha-ci', 'version'], { 
       encoding: 'utf-8', 
-      timeout: 2000,
+      timeout: 3000,
       env: { ...process.env, NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC }
     }).trim();
 
     if (latest && latest !== VERSION) {
-      log(`${c.yellow}${c.bold}🔔 Nova versão disponível: ${latest} (atual: ${VERSION})${c.reset}`);
-      log(`${c.dim}   Execute: npm install -g @area-tech-alpha/alpha-ci${c.reset}\n`);
+      if (autoUpdate) {
+        log(`${c.cyan}🔄 Atualizando alpha-ci para a versão ${latest}...${c.reset}`);
+        try {
+          // Detect if installed globally or locally (use spawnSync to check exit code)
+          const isGlobal = spawnSync('npm', ['list', '-g', '@area-tech-alpha/alpha-ci'], { 
+            stdio: 'ignore',
+            env: { ...process.env, NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC }
+          }).status === 0;
+          
+          const installArgs = isGlobal ? ['install', '-g', '@area-tech-alpha/alpha-ci@latest'] : ['install', '--no-save', '@area-tech-alpha/alpha-ci@latest'];
+          
+          spawn('npm', installArgs, { 
+            detached: true, 
+            stdio: 'ignore',
+            env: { ...process.env, NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC }
+          }).unref();
+          
+          log(`${c.green}✅ Atualização iniciada em segundo plano. Será aplicada na próxima execução.${c.reset}\n`);
+        } catch (e) {
+          log(`${c.yellow}⚠️  Não foi possível auto-atualizar. Execute manualmente: npm install -g @area-tech-alpha/alpha-ci${c.reset}\n`);
+        }
+      } else {
+        log(`${c.yellow}${c.bold}🔔 Nova versão disponível: ${latest} (atual: ${VERSION})${c.reset}`);
+        log(`${c.dim}   Execute: npm install -g @area-tech-alpha/alpha-ci${c.reset}\n`);
+      }
     }
   } catch (e) {
-    // Ignore update check failures (offline/timeout)
+    // Ignore update check failures
   }
 }
 
