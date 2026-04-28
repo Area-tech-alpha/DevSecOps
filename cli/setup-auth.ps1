@@ -106,7 +106,8 @@ try {
 
     # Extrair escopos
     $scopes = $response.Headers["X-OAuth-Scopes"]
-    Write-Host "  ✓ Token válido. Scopes: $($scopes ?? "none (fine-grained?)")" -ForegroundColor Green
+    $displayScopes = if ($null -eq $scopes) { "none (fine-grained?)" } else { $scopes }
+    Write-Host "  ✓ Token válido. Scopes: $displayScopes" -ForegroundColor Green
 
     # Se tiver admin, repo ou write:packages, ele já tem permissão de leitura
     if (($scopes -notmatch "read:packages") -and ($scopes -notmatch "write:packages") -and ($scopes -notmatch "repo") -and ($scopes -notmatch "admin")) {
@@ -198,7 +199,7 @@ try {
     $viewResult = npm view @area-tech-alpha/alpha-ci version 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  ✓ Acesso validado! Versão disponível: $viewResult" -ForegroundColor Green
-    } else {
+        } else {
         Write-Host "  ⚠ Não foi possível validar o acesso. Verifique o token." -ForegroundColor Yellow
         Write-Host "    Se o erro for 403 (Forbidden), você DEVE autorizar o token para SSO:" -ForegroundColor DarkGray
         Write-Host "    → https://github.com/settings/tokens" -ForegroundColor Cyan
