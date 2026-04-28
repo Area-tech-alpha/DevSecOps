@@ -43,6 +43,15 @@ if [ "$IS_NODE" = "true" ]; then
     set -e
     if [ $BUILD_EXIT -ne 0 ]; then echo -e "  ${RED}❌ Build falhou${NC}"; OVERALL_EXIT=1
     else echo -e "  ${GREEN}✅ Build: Sucesso${NC}"; fi
+  elif [ "${IS_SWC:-false}" = "true" ]; then
+    BUILD_RAN=true
+    echo -e "\n${CYAN}⚡ Running SWC build...${NC}"
+    set +e
+    npx swc src -d dist
+    SWC_EXIT=$?
+    set -e
+    if [ $SWC_EXIT -ne 0 ]; then echo -e "  ${RED}❌ SWC build falhou${NC}"; OVERALL_EXIT=1
+    else echo -e "  ${GREEN}✅ SWC Build: Sucesso${NC}"; fi
   fi
 
   if [ "$IS_TYPESCRIPT" = "true" ]; then

@@ -4,7 +4,7 @@
 # ║                                                              ║
 # ║  Uso:                                                        ║
 # ║  irm https://raw.githubusercontent.com/Area-tech-alpha/      ║
-# ║    DevSecOps/main/cli/setup-auth.ps1 | iex                  ║
+# ║    DevSecOps/main/cli/setup-auth.ps1 | iex                   ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 $ErrorActionPreference = "Stop"
