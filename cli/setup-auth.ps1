@@ -91,15 +91,56 @@ if (-not $ghToken) {
     }
 }
 
-# ── Sempre pedir username se não foi detectado ──
-if (-not $ghUsername) {
-    Write-Host ""
-    $ghUsername = Read-Host "  Digite seu usuário do GitHub"
+# ── Validação Ativa do Token ──
+Write-Host "  🔍 Validando token contra a API do GitHub..." -ForegroundColor Cyan
 
-    if (-not $ghUsername) {
-        Write-Host "`n  ❌ Nenhum usuário fornecido. Abortando." -ForegroundColor Red
+try {
+    $headers = @{ "Authorization" = "token $ghToken" }
+    $response = Invoke-WebRequest -Uri "https://api.github.com/user" -Headers $headers -Method Get
+    $httpStatus = $response.StatusCode
+
+    if ($httpStatus -ne 200) {
+        Write-Host "  ❌ Token inválido ou expirado (HTTP $httpStatus)." -ForegroundColor Red
         exit 1
     }
+
+    # Extrair escopos
+    $scopes = $response.Headers["X-OAuth-Scopes"]
+    Write-Host "  ✓ Token válido. Scopes: $($scopes ?? "none (fine-grained?)")" -ForegroundColor Green
+
+    # Se tiver admin, repo ou write:packages, ele já tem permissão de leitura
+    if (($scopes -notmatch "read:packages") -and ($scopes -notmatch "write:packages") -and ($scopes -notmatch "repo") -and ($scopes -notmatch "admin")) {
+        # Se o token for fine-grained (github_pat_), não bloqueamos por falta de header
+        if ($ghToken -notmatch "^github_pat_") {
+            Write-Host "  ⚠️  Aviso: O token pode não ter o escopo 'read:packages'." -ForegroundColor Yellow
+            Write-Host "     Se falhar com 403, revise os escopos em: https://github.com/settings/tokens" -ForegroundColor DarkGray
+        }
+    }
+
+    # Extrair username automaticamente se não tivermos
+    if (-not $ghUsername) {
+        $userJson = $response.Content | ConvertFrom-Json
+        $ghUsername = $userJson.login
+        Write-Host "  ✓ Usuário detectado: $ghUsername" -ForegroundColor Green
+    }
+
+    # Verificar acesso à Org e SSO
+    try {
+        $orgResponse = Invoke-WebRequest -Uri "https://api.github.com/orgs/Area-tech-alpha" -Headers $headers -Method Get
+    } catch {
+        Write-Host "" -ForegroundColor Red
+        Write-Host "  ⚠️  Possível problema de SSO ou Acesso à Org." -ForegroundColor Yellow
+        Write-Host "     Você deve autorizar este token para a organização 'Area-tech-alpha':" -ForegroundColor White
+        Write-Host "     → https://github.com/settings/tokens" -ForegroundColor Cyan
+        Write-Host "     Clique no seu token → 'Configure SSO' ao lado de 'Area-tech-alpha' → 'Authorize'" -ForegroundColor DarkGray
+        Write-Host ""
+        Read-Host "  Pressione ENTER após autorizar para continuar ou CTRL+C para sair..."
+    }
+
+} catch {
+    Write-Host "  ❌ Falha crítica na validação do token: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "     Verifique sua conexão e o token em: https://github.com/settings/tokens" -ForegroundColor DarkGray
+    exit 1
 }
 
 Write-Host ""
@@ -121,14 +162,32 @@ if ((Test-Path $npmrcLocal) -and ($npmrcLocal -ne $npmrcGlobal)) {
     }
 }
 
+# Higieniza o .npmrc (remove entradas conflitantes ou malformadas no Windows)
+try {
+    if (Test-Path $npmrcGlobal) {
+        $content = Get-Content $npmrcGlobal -ErrorAction SilentlyContinue
+        if ($content) {
+            $newContent = $content | Where-Object { 
+                $_ -notmatch 'area-tech-alpha:registry' -and 
+                $_ -notmatch 'npm\.pkg\.github\.com/:_authToken' -and
+                $_ -notmatch 'npm\.pkg\.github\.com/always-auth'
+            }
+            Set-Content -Path $npmrcGlobal -Value $newContent -ErrorAction SilentlyContinue
+        }
+    }
+} catch {
+    # Ignora falhas de limpeza (ex: arquivo travado)
+}
+
 # Configura via npm config (grava no .npmrc global automaticamente)
+Write-Host "  ⚙️  Configurando registry e token..." -ForegroundColor Cyan
 npm config set @area-tech-alpha:registry https://npm.pkg.github.com 2>$null
 npm config set //npm.pkg.github.com/:_authToken $ghToken 2>$null
 npm config set always-auth true 2>$null
 
-Write-Host "  ✓ Registry @area-tech-alpha → npm.pkg.github.com" -ForegroundColor Green
-Write-Host "  ✓ Auth token configurado no .npmrc global" -ForegroundColor Green
-Write-Host "  ✓ always-auth = true (para evitar 403 intermitentes)" -ForegroundColor Green
+Write-Host "  ✓ Registry @area-tech-alpha configurado" -ForegroundColor Green
+Write-Host "  ✓ Auth token injetado e higienizado" -ForegroundColor Green
+Write-Host "  ✓ always-auth = true (enforced)" -ForegroundColor Green
 
 # Verifica se funcionou
 Write-Host ""
@@ -159,6 +218,19 @@ Write-Host ""
 
 if (Get-Command docker -ErrorAction SilentlyContinue) {
     Write-Host "  ✓ Docker detectado" -ForegroundColor Green
+
+    # Tenta verificar se o daemon está rodando
+    try {
+        $null = docker info 2>$null
+    } catch {
+        # Docker não está respondendo, tenta iniciar no Windows
+        $dockerPath = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+        if (Test-Path $dockerPath) {
+            Write-Host "  🐳 Docker não está rodando. Tentando iniciar Docker Desktop..." -ForegroundColor Cyan
+            Start-Process $dockerPath
+            Write-Host "    Aguarde o Docker inicializar e rode o script novamente." -ForegroundColor DarkGray
+        }
+    }
 
     # Login no GHCR usando o token que já temos
     Write-Host "  🔑 Fazendo login no GitHub Container Registry..." -ForegroundColor Cyan

@@ -320,7 +320,19 @@ function dockerAvailable() {
   try {
     execFileSync('docker', ['info'], { stdio: 'ignore' });
     return true;
-  } catch { return false; }
+  } catch (e) {
+    // No Windows, tenta iniciar o Docker Desktop automaticamente
+    if (process.platform === 'win32') {
+      const dockerPath = 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe';
+      if (existsSync(dockerPath)) {
+        info('🐳 Docker não está rodando. Tentando iniciar Docker Desktop...');
+        try {
+          spawn(dockerPath, [], { detached: true, stdio: 'ignore' }).unref();
+        } catch (err) {}
+      }
+    }
+    return false;
+  }
 }
 
 function imageExists(img) {

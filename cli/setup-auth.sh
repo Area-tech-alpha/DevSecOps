@@ -98,15 +98,51 @@ if [ -z "$GH_TOKEN" ]; then
   fi
 fi
 
-# ── Sempre pedir username se não foi detectado ──
-if [ -z "$GH_USERNAME" ]; then
-  echo ""
-  read -rp "  Digite seu usuário do GitHub: " GH_USERNAME
+# ── Validação Ativa do Token ──
+echo -e "  ${CYAN}🔍 Validando token contra a API do GitHub...${NC}"
 
-  if [ -z "$GH_USERNAME" ]; then
-    echo -e "\n  ${RED}❌ Nenhum usuário fornecido. Abortando.${NC}"
-    exit 1
+# Silenciosamente tenta pegar info do usuário e escopos
+API_RESPONSE=$(curl -s -I -H "Authorization: token $GH_TOKEN" https://api.github.com/user)
+HTTP_STATUS=$(echo "$API_RESPONSE" | grep "HTTP/" | awk '{print $2}' | head -n 1)
+
+if [ "$HTTP_STATUS" != "200" ]; then
+  echo -e "  ${RED}❌ Token inválido ou expirado (HTTP $HTTP_STATUS).${NC}"
+  echo -e "     Verifique em: https://github.com/settings/tokens"
+  exit 1
+fi
+
+# Extrair escopos do header X-OAuth-Scopes
+SCOPES=$(echo "$API_RESPONSE" | grep -i "x-oauth-scopes:" | cut -d':' -f2 | tr -d ' \r\n')
+echo -e "  ${GREEN}✓${NC} Token válido. Scopes: ${DIM}${SCOPES:-none (fine-grained?)}${NC}"
+
+# Se tiver admin, repo ou write:packages, ele já tem permissão de leitura
+if [[ ! "$SCOPES" =~ "read:packages" ]] && [[ ! "$SCOPES" =~ "write:packages" ]] && [[ ! "$SCOPES" =~ "repo" ]] && [[ ! "$SCOPES" =~ "admin" ]]; then
+  # Se o token for fine-grained (github_pat_), o header de scopes pode vir vazio, então não bloqueamos
+  if [[ ! "$GH_TOKEN" =~ ^github_pat_ ]]; then
+    echo -e "  ${YELLOW}⚠️  Aviso: O token pode não ter o escopo 'read:packages'.${NC}"
+    echo -e "     Se falhar com 403, revise os escopos em: https://github.com/settings/tokens"
   fi
+fi
+
+# Extrair username automaticamente se ainda não tivermos
+if [ -z "$GH_USERNAME" ]; then
+  GH_USERNAME=$(curl -s -H "Authorization: token $GH_TOKEN" https://api.github.com/user | grep -oP '"login":\s*"\K[^"]+')
+  echo -e "  ${GREEN}✓${NC} Usuário detectado: ${BOLD}$GH_USERNAME${NC}"
+fi
+
+# Verificar se pertence à Area-tech-alpha e se precisa de SSO
+ORG_CHECK=$(curl -s -I -H "Authorization: token $GH_TOKEN" https://api.github.com/orgs/Area-tech-alpha)
+ORG_STATUS=$(echo "$ORG_CHECK" | grep "HTTP/" | awk '{print $2}' | head -n 1)
+
+if [ "$ORG_STATUS" = "403" ] || [ "$ORG_STATUS" = "404" ]; then
+  echo -e ""
+  echo -e "  ${YELLOW}⚠️  Possível problema de SSO ou Acesso à Org.${NC}"
+  echo -e "     Você deve autorizar este token para a organização 'Area-tech-alpha':"
+  echo -e "     ${CYAN}→ https://github.com/settings/tokens${NC}"
+  echo -e "     ${DIM}→ Clique no seu token → 'Configure SSO' ao lado de 'Area-tech-alpha'${NC}"
+  echo -e "     ${DIM}→ Clique em 'Authorize'${NC}"
+  echo ""
+  read -p "  Pressione ENTER após autorizar para continuar ou CTRL+C para sair..."
 fi
 
 echo ""
@@ -127,14 +163,23 @@ if [ -f "$NPMRC_LOCAL" ] && [ "$NPMRC_LOCAL" != "$NPMRC_GLOBAL" ]; then
   fi
 fi
 
+# Higieniza o .npmrc (remove entradas conflitantes ou malformadas)
+if [ -f "$NPMRC_GLOBAL" ]; then
+  # Remove linhas antigas (usa || true para não quebrar o script se o sed falhar)
+  sed -i '/area-tech-alpha:registry/d' "$NPMRC_GLOBAL" || true
+  sed -i '/npm.pkg.github.com\/:_authToken/d' "$NPMRC_GLOBAL" || true
+  sed -i '/npm.pkg.github.com\/always-auth/d' "$NPMRC_GLOBAL" || true
+fi
+
 # Configura via npm config (grava no .npmrc global automaticamente)
+echo -e "  ${CYAN}⚙️  Configurando registry e token...${NC}"
 npm config set @area-tech-alpha:registry https://npm.pkg.github.com 2>/dev/null
 npm config set "//npm.pkg.github.com/:_authToken" "$GH_TOKEN" 2>/dev/null
 npm config set always-auth true 2>/dev/null
 
-echo -e "  ${GREEN}✓${NC} Registry @area-tech-alpha → npm.pkg.github.com"
-echo -e "  ${GREEN}✓${NC} Auth token configurado no .npmrc global"
-echo -e "  ${GREEN}✓${NC} always-auth = true (para evitar 403 intermitentes)"
+echo -e "  ${GREEN}✓${NC} Registry @area-tech-alpha configurado"
+echo -e "  ${GREEN}✓${NC} Auth token injetado e higienizado"
+echo -e "  ${GREEN}✓${NC} always-auth = true (enforced)"
 
 # Valida acesso
 echo ""
