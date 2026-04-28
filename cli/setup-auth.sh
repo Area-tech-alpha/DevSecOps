@@ -130,9 +130,11 @@ fi
 # Configura via npm config (grava no .npmrc global automaticamente)
 npm config set @area-tech-alpha:registry https://npm.pkg.github.com 2>/dev/null
 npm config set "//npm.pkg.github.com/:_authToken" "$GH_TOKEN" 2>/dev/null
+npm config set always-auth true 2>/dev/null
 
 echo -e "  ${GREEN}✓${NC} Registry @area-tech-alpha → npm.pkg.github.com"
 echo -e "  ${GREEN}✓${NC} Auth token configurado no .npmrc global"
+echo -e "  ${GREEN}✓${NC} always-auth = true (para evitar 403 intermitentes)"
 
 # Valida acesso
 echo ""
@@ -146,9 +148,10 @@ if [ $VIEW_EXIT -eq 0 ]; then
   echo -e "  ${GREEN}✓${NC} Acesso validado! Versão disponível: ${BOLD}$VIEW_RESULT${NC}"
 else
   echo -e "  ${YELLOW}⚠${NC} Não foi possível validar o acesso. Verifique o token."
-  echo -e "    ${DIM}Se o erro persistir, autorize o token para a org:${NC}"
+  echo -e "    ${DIM}Se o erro for 403 (Forbidden), você DEVE autorizar o token para SSO:${NC}"
   echo -e "    ${CYAN}→ https://github.com/settings/tokens${NC}"
-  echo -e "    ${DIM}→ Clique no token → Authorize para 'Area-tech-alpha'${NC}"
+  echo -e "    ${DIM}→ Clique no seu token → 'Configure SSO' (ao lado de 'Area-tech-alpha')${NC}"
+  echo -e "    ${DIM}→ Clique em 'Authorize'${NC}"
 fi
 
 echo ""

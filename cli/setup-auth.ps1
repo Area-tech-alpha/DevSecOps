@@ -124,9 +124,11 @@ if ((Test-Path $npmrcLocal) -and ($npmrcLocal -ne $npmrcGlobal)) {
 # Configura via npm config (grava no .npmrc global automaticamente)
 npm config set @area-tech-alpha:registry https://npm.pkg.github.com 2>$null
 npm config set //npm.pkg.github.com/:_authToken $ghToken 2>$null
+npm config set always-auth true 2>$null
 
 Write-Host "  ✓ Registry @area-tech-alpha → npm.pkg.github.com" -ForegroundColor Green
 Write-Host "  ✓ Auth token configurado no .npmrc global" -ForegroundColor Green
+Write-Host "  ✓ always-auth = true (para evitar 403 intermitentes)" -ForegroundColor Green
 
 # Verifica se funcionou
 Write-Host ""
@@ -137,9 +139,10 @@ try {
         Write-Host "  ✓ Acesso validado! Versão disponível: $viewResult" -ForegroundColor Green
     } else {
         Write-Host "  ⚠ Não foi possível validar o acesso. Verifique o token." -ForegroundColor Yellow
-        Write-Host "    Se o erro persistir, autorize o token para a org:" -ForegroundColor DarkGray
+        Write-Host "    Se o erro for 403 (Forbidden), você DEVE autorizar o token para SSO:" -ForegroundColor DarkGray
         Write-Host "    → https://github.com/settings/tokens" -ForegroundColor Cyan
-        Write-Host "    → Clique no token → Authorize para 'Area-tech-alpha'" -ForegroundColor DarkGray
+        Write-Host "    → Clique no seu token → 'Configure SSO' (ao lado de 'Area-tech-alpha')" -ForegroundColor DarkGray
+        Write-Host "    → Clique em 'Authorize'" -ForegroundColor DarkGray
     }
 } catch {
     Write-Host "  ⚠ Validação ignorada (npm não respondeu)" -ForegroundColor Yellow

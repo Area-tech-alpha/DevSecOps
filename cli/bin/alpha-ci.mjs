@@ -62,11 +62,23 @@ let autoFix = false;
 let reportFormat = 'text';
 let reportOutput = '';
 
-// Security: Tokens are sourced ONLY from environment variables.
-// Passing secrets via CLI args leaks them into shell history,
-// process listings (ps aux), and audit logs.
+// Security: Tokens are sourced ONLY from environment variables or global .npmrc.
 const semgrepToken = process.env.SEMGREP_APP_TOKEN || '';
-const githubToken = process.env.GITHUB_TOKEN || process.env.NODE_AUTH_TOKEN || '';
+let githubToken = process.env.GITHUB_TOKEN || process.env.NODE_AUTH_TOKEN || '';
+
+// Fallback: If token not in env, try to extract from global .npmrc
+if (!githubToken && existsSync(GLOBAL_NPMRC)) {
+  try {
+    const npmrcContent = readFileSync(GLOBAL_NPMRC, 'utf-8');
+    // Match //npm.pkg.github.com/:_authToken=TOKEN
+    const match = npmrcContent.match(/\/\/npm\.pkg\.github\.com\/:_authToken=(.+)/);
+    if (match) {
+      githubToken = match[1].trim();
+    }
+  } catch (e) {
+    // Ignore read errors
+  }
+}
 
 // ── Allowed report formats (whitelist) ──
 const ALLOWED_FORMATS = new Set(['text', 'json', 'sarif']);
@@ -217,6 +229,45 @@ function validateTargetPath(p) {
 }
 
 targetPath = validateTargetPath(targetPath);
+
+// ── Persistence: Auto-install pre-push hook on first run in a project ──
+(function installHookOnHost() {
+  try {
+    const auto = process.env.ALPHA_CI_AUTO_INSTALL_HOOK;
+    if (auto === 'false' || auto === '0') return;
+
+    const hostGitDir = existsSync(resolve(targetPath, '.git')) ? resolve(targetPath, '.git') : null;
+    if (!hostGitDir) return;
+
+    const tpl = resolve(import.meta.dirname, '../hooks/pre-push-template');
+    const fallbackTpl = resolve(process.cwd(), 'cli/hooks/pre-push-template');
+
+    let src = null;
+    if (existsSync(tpl)) src = tpl;
+    else if (existsSync(fallbackTpl)) src = fallbackTpl;
+    else return;
+
+    const hooksDir = resolve(hostGitDir, 'hooks');
+    if (!existsSync(hooksDir)) mkdirSync(hooksDir, { recursive: true });
+
+    const dest = resolve(hooksDir, 'pre-push');
+
+    if (existsSync(dest)) {
+      const content = readFileSync(dest, 'utf-8');
+      if (content.includes('ALPHA-CI-HOOK')) return;
+      try { copyFileSync(dest, `${dest}.alpha-ci.bak`); } catch (e) {}
+    }
+
+    copyFileSync(src, dest);
+    const marker = '# ALPHA-CI-HOOK: installed by alpha-ci\n';
+    const existing = readFileSync(dest, 'utf-8');
+    writeFileSync(dest, marker + existing, { mode: 0o755 });
+    chmodSync(dest, 0o755);
+    info(`🔧 Installed pre-push hook at ${dest}`);
+  } catch (e) {
+    // Silent fail unless verbose (validation path might be sensitive)
+  }
+})();
 
 // ── Security: Validate report output path ──
 function validateOutputPath(output, target) {
@@ -428,52 +479,6 @@ async function run() {
   info(`🚀 Command: ${command}`);
   log('');
 
-  // Attempt to install pre-push hook on the host repository (runs on host)
-  (function installHookOnHost() {
-    try {
-      const auto = process.env.ALPHA_CI_AUTO_INSTALL_HOOK;
-      if (auto === 'false' || auto === '0') return;
-
-      const hostGitDir = existsSync(`${targetPath}/.git`) ? `${targetPath}/.git` : null;
-      if (!hostGitDir) return;
-
-      // Try to find hook template relative to the CLI package (../hooks/pre-push-template)
-      const templatePath = resolve(import.meta.url, '../hooks/pre-push-template');
-      // import.meta.url returns file://... ; transform to path
-      const tpl = templatePath.replace('file://', '');
-      // When running from global install, template may not exist. Also try repo relative path.
-      const fallbackTpl = resolve(process.cwd(), 'cli/hooks/pre-push-template');
-
-      let src = null;
-      if (existsSync(tpl)) src = tpl;
-      else if (existsSync(fallbackTpl)) src = fallbackTpl;
-      else return;
-
-      const hooksDir = `${targetPath}/.git/hooks`;
-      try { mkdirSync(hooksDir, { recursive: true }); } catch (e) {}
-
-      const dest = `${hooksDir}/pre-push`;
-
-      // If already installed and contains marker, skip
-      if (existsSync(dest)) {
-        const content = readFileSync(dest, 'utf-8');
-        if (content.includes('ALPHA-CI-HOOK')) return;
-        // backup
-        try { copyFileSync(dest, `${dest}.alpha-ci.bak`); } catch (e) {}
-      }
-
-      // Copy template and add marker
-      copyFileSync(src, dest);
-      // Prepend marker comment for idempotency
-      const marker = '# ALPHA-CI-HOOK: installed by alpha-ci\n';
-      const existing = readFileSync(dest, 'utf-8');
-      writeFileSync(dest, marker + existing, { mode: 0o755 });
-      chmodSync(dest, 0o755);
-      info(`🔧 Installed pre-push hook at ${dest}`);
-    } catch (e) {
-      if (verbose) console.error('Hook install error:', e.message || e);
-    }
-  })();
 
   // Create secure env file (prevents token leakage via ps/docker inspect)
   const envFile = createEnvFile();
