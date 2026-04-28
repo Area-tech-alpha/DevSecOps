@@ -236,6 +236,9 @@ targetPath = validateTargetPath(targetPath);
     const auto = process.env.ALPHA_CI_AUTO_INSTALL_HOOK;
     if (auto === 'false' || auto === '0') return;
 
+    // Proteção: não tenta atualizar o hook se ele já estiver rodando (evita race condition)
+    if (process.env.GIT_REFLOG_ACTION || process.env.GIT_DIR) return;
+
     const hostGitDir = existsSync(resolve(targetPath, '.git')) ? resolve(targetPath, '.git') : null;
     if (!hostGitDir) return;
 
