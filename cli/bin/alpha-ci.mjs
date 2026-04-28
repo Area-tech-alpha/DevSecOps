@@ -253,9 +253,19 @@ targetPath = validateTargetPath(targetPath);
     const dest = resolve(hooksDir, 'pre-push');
 
     if (existsSync(dest)) {
-      const content = readFileSync(dest, 'utf-8');
-      // If our marker is there AND shebang is at line 1, we are good.
-      if (content.includes('ALPHA-CI-HOOK') && content.startsWith('#!')) return;
+      const existingContent = readFileSync(dest, 'utf-8');
+      
+      // If our marker is there AND shebang is at line 1
+      if (existingContent.includes('ALPHA-CI-HOOK') && existingContent.startsWith('#!')) {
+        // Optimization: check if the template core is actually different
+        const templateContent = readFileSync(src, 'utf-8');
+        // Extract core content (ignore shebang)
+        const coreExisting = existingContent.split('\n').slice(2).join('\n');
+        const coreTemplate = templateContent.split('\n').slice(1).join('\n');
+        
+        if (coreExisting === coreTemplate) return; // Already up to date
+      }
+      
       try { copyFileSync(dest, `${dest}.alpha-ci.bak`); } catch (e) {}
     }
 
