@@ -1,6 +1,6 @@
 {
   "name": "@area-tech-alpha/alpha-ci",
-  "version": "1.0.24",
+  "version": "1.0.25",
   "description": "🛡️ Alpha CI — DevSecOps pipeline runner local. Roda security, lint, test e build igual ao GitHub Actions.",
   "license": "UNLICENSED",
   "private": false,
