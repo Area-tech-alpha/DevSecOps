@@ -416,6 +416,18 @@ function cleanupEnvFile(envFilePath) {
   }
 }
 
+function exitCodeFromSignal(signal) {
+  if (signal === 'SIGINT') return 130;
+  if (signal === 'SIGTERM') return 143;
+  return 1;
+}
+
+function exitCodeFromChildClose(code, signal) {
+  if (typeof code === 'number') return code;
+  if (signal) return exitCodeFromSignal(signal);
+  return 1;
+}
+
 // ── No-Docker Mode ──
 function runNoDocker() {
   const cliDir = findCliDir();
@@ -472,7 +484,7 @@ function runNoDocker() {
     env,
   });
 
-  child.on('close', (code) => process.exit(code || 0));
+  child.on('close', (code, signal) => process.exit(exitCodeFromChildClose(code, signal)));
   child.on('error', (err) => {
     error(`❌ Erro ao executar: ${err.message}`);
     process.exit(1);
@@ -622,20 +634,43 @@ async function run() {
     },
   });
 
-  child.on('close', (code) => {
+  let terminating = false;
+  let forceExitTimer = null;
+
+  function terminateFromSignal(signal) {
+    if (terminating) return;
+    terminating = true;
+
+    const exitCode = exitCodeFromSignal(signal);
     cleanupEnvFile(envFile);
-    process.exit(code || 0);
+
+    try {
+      if (!child.killed) child.kill(signal);
+    } catch {
+      // Best effort signal forwarding.
+    }
+
+    forceExitTimer = setTimeout(() => {
+      error(`❌ Docker não encerrou após ${signal}; finalizando alpha-ci.`);
+      process.exit(exitCode);
+    }, 5000);
+  }
+
+  child.on('close', (code, signal) => {
+    if (forceExitTimer) clearTimeout(forceExitTimer);
+    cleanupEnvFile(envFile);
+    process.exit(exitCodeFromChildClose(code, signal));
   });
 
   child.on('error', (err) => {
+    if (forceExitTimer) clearTimeout(forceExitTimer);
     cleanupEnvFile(envFile);
     error(`❌ Erro ao executar Docker: ${err.message}`);
     process.exit(1);
   });
 
-  // Cleanup on unexpected exit
-  process.on('SIGINT', () => cleanupEnvFile(envFile));
-  process.on('SIGTERM', () => cleanupEnvFile(envFile));
+  process.once('SIGINT', () => terminateFromSignal('SIGINT'));
+  process.once('SIGTERM', () => terminateFromSignal('SIGTERM'));
 }
 
 run();
