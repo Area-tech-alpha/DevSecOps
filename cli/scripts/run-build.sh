@@ -46,12 +46,45 @@ if [ "$IS_NODE" = "true" ]; then
   elif [ "${IS_SWC:-false}" = "true" ]; then
     BUILD_RAN=true
     echo -e "\n${CYAN}⚡ Running SWC build...${NC}"
-    set +e
-    npx swc src -d dist
-    SWC_EXIT=$?
-    set -e
-    if [ $SWC_EXIT -ne 0 ]; then echo -e "  ${RED}❌ SWC build falhou${NC}"; OVERALL_EXIT=1
-    else echo -e "  ${GREEN}✅ SWC Build: Sucesso${NC}"; fi
+
+    SWC_SCRIPT=""
+    if SWC_SCRIPT=$(node -e "
+      const scripts = require('./package.json').scripts || {};
+      for (const name of ['build:swc', 'swc']) {
+        if (scripts[name]) {
+          console.log(name);
+          process.exit(0);
+        }
+      }
+      process.exit(1);
+    " 2>/dev/null); then
+      set +e
+      npm run "$SWC_SCRIPT"
+      SWC_EXIT=$?
+      set -e
+      if [ $SWC_EXIT -ne 0 ]; then echo -e "  ${RED}❌ SWC script '$SWC_SCRIPT' falhou${NC}"; OVERALL_EXIT=1
+      else echo -e "  ${GREEN}✅ SWC script '$SWC_SCRIPT': Sucesso${NC}"; fi
+    elif [ -d src ]; then
+      SWC_BIN=""
+      if [ -x "./node_modules/.bin/swc" ]; then
+        SWC_BIN="./node_modules/.bin/swc"
+      elif command -v swc >/dev/null 2>&1; then
+        SWC_BIN="swc"
+      fi
+
+      if [ -z "$SWC_BIN" ]; then
+        echo -e "  ${YELLOW}⚠ SWC detectado, mas @swc/cli não está disponível. Pulando build SWC implícito.${NC}"
+      else
+        set +e
+        "$SWC_BIN" src -d dist
+        SWC_EXIT=$?
+        set -e
+        if [ $SWC_EXIT -ne 0 ]; then echo -e "  ${RED}❌ SWC build falhou${NC}"; OVERALL_EXIT=1
+        else echo -e "  ${GREEN}✅ SWC Build: Sucesso${NC}"; fi
+      fi
+    else
+      echo -e "  ${YELLOW}⚠ SWC detectado, mas não há script build/build:swc/swc nem diretório src. Pulando build SWC implícito.${NC}"
+    fi
   fi
 
   if [ "$IS_TYPESCRIPT" = "true" ]; then

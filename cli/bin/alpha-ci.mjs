@@ -479,15 +479,15 @@ function runNoDocker() {
   });
 }
 
-// ── Check and Auto-Update NPM Package ──
+// ── Check and optionally update the global NPM package ──
 async function checkForUpdates() {
   try {
-    const autoUpdate = process.env.ALPHA_CI_AUTO_UPDATE !== 'false';
+    const autoUpdate = process.env.ALPHA_CI_AUTO_UPDATE === 'true';
 
-    // Silent check: get latest version from registry
+    // Short, best-effort check. Never install into the target project.
     const latest = execFileSync('npm', ['view', '@area-tech-alpha/alpha-ci', 'version'], {
       encoding: 'utf-8',
-      timeout: 3000,
+      timeout: 1500,
       env: { ...process.env, NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC }
     }).trim();
 
@@ -501,9 +501,13 @@ async function checkForUpdates() {
             env: { ...process.env, NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC }
           }).status === 0;
 
-          const installArgs = isGlobal ? ['install', '-g', '@area-tech-alpha/alpha-ci@latest'] : ['install', '--no-save', '@area-tech-alpha/alpha-ci@latest'];
+          if (!isGlobal) {
+            log(`${c.yellow}⚠️  Auto-update local desativado para não modificar o projeto alvo.${c.reset}`);
+            log(`${c.dim}   Execute: npm install -g @area-tech-alpha/alpha-ci${c.reset}\n`);
+            return;
+          }
 
-          spawn('npm', installArgs, {
+          spawn('npm', ['install', '-g', '@area-tech-alpha/alpha-ci@latest'], {
             detached: true,
             stdio: 'ignore',
             env: { ...process.env, NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC }
@@ -525,8 +529,8 @@ async function checkForUpdates() {
 
 // ── Run ──
 async function run() {
-  // Check for updates in the background (don't block start)
-  if (!args.includes('--version')) {
+  // Check for updates only when enabled; the check can touch the network.
+  if ((process.env.ALPHA_CI_CHECK_UPDATES === 'true' || process.env.ALPHA_CI_AUTO_UPDATE === 'true') && !args.includes('--version')) {
     checkForUpdates();
   }
 

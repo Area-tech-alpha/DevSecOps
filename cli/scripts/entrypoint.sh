@@ -40,14 +40,31 @@ export WORKSPACE
 
 cd "$WORKSPACE"
 
-# ── Proteção Extrema: Forçar .npmrc global e aniquilar o local ──
-# Se o projeto tiver um .npmrc local, ele pode gerar erros de EACCES
-# ou conflitos de registry. Como estamos em um workspace isolado (/workspace),
-# podemos apagar o .npmrc local sem afetar o host!
-if [ -f "$WORKSPACE/.npmrc" ]; then
-  echo -e "  ${DIM}ℹ️  Apagando .npmrc local do workspace isolado para evitar conflitos de permissão...${NC}"
-  rm -f "$WORKSPACE/.npmrc"
-fi
+# ── NPM auth/config hygiene ──
+# Mantém registries locais do projeto, mas remove entradas que redirecionam npm
+# para paths do host ou duplicam auth do GitHub Packages. O userconfig global
+# montado em /home/alpha-ci/.npmrc continua sendo a fonte de token da org.
+sanitize_project_npmrc() {
+  [ -f "$WORKSPACE/.npmrc" ] || return 0
+
+  echo -e "  ${DIM}ℹ️  Sanitizando .npmrc local do workspace isolado...${NC}"
+  local tmp_npmrc="/tmp/alpha-ci-project-npmrc.$$"
+
+  awk '
+    /^[[:space:]]*(cache|prefix|userconfig|globalconfig)[[:space:]]*=/ { next }
+    /^[[:space:]]*\/\/npm\.pkg\.github\.com\/:_authToken[[:space:]]*=/ { next }
+    /^[[:space:]]*always-auth[[:space:]]*=/ { next }
+    { print }
+  ' "$WORKSPACE/.npmrc" > "$tmp_npmrc"
+
+  if [ -s "$tmp_npmrc" ]; then
+    mv "$tmp_npmrc" "$WORKSPACE/.npmrc"
+  else
+    rm -f "$WORKSPACE/.npmrc" "$tmp_npmrc"
+  fi
+}
+
+sanitize_project_npmrc
 
 # O host's global .npmrc já foi montado como read-only em /home/alpha-ci/.npmrc
 export NPM_CONFIG_USERCONFIG=/home/alpha-ci/.npmrc
@@ -369,11 +386,27 @@ generate_report() {
 
 sync_back_to_host() {
   if [ -d "/host_workspace" ]; then
+    if [ "${AUTO_FIX:-false}" != "true" ]; then
+      [ "$VERBOSE" = "true" ] && echo -e "  ${DIM}⏩ Sync-back pulado (sem --fix)${NC}"
+      return 0
+    fi
+
     echo -e "\n  ${DIM}ℹ️  Sincronizando arquivos de volta para o host...${NC}"
     
     # Redireciona os erros do tar para um arquivo para podermos analisá-los
     set +e
-    tar --exclude='node_modules' --exclude='.git' -cf - -C /workspace . | tar --no-same-owner --no-same-permissions -xf - -C /host_workspace 2> /tmp/sync-errors.log
+    tar \
+      --exclude='node_modules' \
+      --exclude='.git' \
+      --exclude='.next' \
+      --exclude='dist' \
+      --exclude='build' \
+      --exclude='coverage' \
+      --exclude='out' \
+      --exclude='.turbo' \
+      --exclude='.cache' \
+      --exclude='*.tsbuildinfo' \
+      -cf - -C /workspace . | tar --no-same-owner --no-same-permissions -xf - -C /host_workspace 2> /tmp/sync-errors.log
     local tar_exit_code=$?
     set -e
 
@@ -420,6 +453,7 @@ case "$COMMAND" in
       RESULTS+=("🔍 Lint:1")
       OVERALL=1
     fi
+    sync_back_to_host
 
     # Test
     if run_stage "Unit Tests" "run-test.sh" "🧪"; then
@@ -438,7 +472,6 @@ case "$COMMAND" in
     fi
 
     summary "$OVERALL" "${RESULTS[@]}"
-    sync_back_to_host
     exit "$OVERALL"
     ;;
 
@@ -447,7 +480,6 @@ case "$COMMAND" in
     detect_project
     run_stage "Security Scan" "run-security.sh" "🔐"
     EXIT_CODE=$?
-    sync_back_to_host
     exit $EXIT_CODE
     ;;
 
@@ -465,7 +497,6 @@ case "$COMMAND" in
     detect_project
     run_stage "Unit Tests" "run-test.sh" "🧪"
     EXIT_CODE=$?
-    sync_back_to_host
     exit $EXIT_CODE
     ;;
 
@@ -474,7 +505,6 @@ case "$COMMAND" in
     detect_project
     run_stage "Build" "run-build.sh" "🏗"
     EXIT_CODE=$?
-    sync_back_to_host
     exit $EXIT_CODE
     ;;
 
