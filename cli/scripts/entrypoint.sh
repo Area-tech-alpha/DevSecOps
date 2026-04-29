@@ -196,65 +196,6 @@ sync_configs() {
 
 sync_configs
 
-# ── Auto-install pre-push hook into repository (host or workspace) ──
-install_pre_push_hook_if_missing() {
-  local enable=${ALPHA_CI_AUTO_INSTALL_HOOK:-true}
-  if [ "$enable" = "false" ] || [ "$enable" = "0" ]; then
-    [ "$VERBOSE" = "true" ] && echo -e "  ${DIM}⏩ Auto-install hook disabled by ALPHA_CI_AUTO_INSTALL_HOOK${NC}"
-    return 0
-  fi
-
-  local hook_src="/opt/alpha-ci/hooks/pre-push-template"
-  [ -f "$hook_src" ] || return 0
-
-  local dest_git
-  if [ -d "/host_workspace" ] && [ -d "/host_workspace/.git" ]; then
-    dest_git="/host_workspace/.git"
-  elif [ -d "$WORKSPACE/.git" ]; then
-    dest_git="$WORKSPACE/.git"
-  else
-    # Not a git repo
-    return 0
-  fi
-
-  local hook_dest="$dest_git/hooks/pre-push"
-
-  # If hook already installed and contains marker, skip
-  if [ -f "$hook_dest" ] && grep -q "ALPHA-CI-HOOK" "$hook_dest" 2>/dev/null; then
-    [ "$VERBOSE" = "true" ] && echo -e "  ${DIM}⏩ pre-push hook already installed (marker found)${NC}"
-    return 0
-  fi
-
-  # Backup existing hook if present
-  if [ -f "$hook_dest" ]; then
-    cp "$hook_dest" "$hook_dest.alpha-ci.bak" 2>/dev/null || true
-    chmod +x "$hook_dest.alpha-ci.bak" 2>/dev/null || true
-  fi
-
-  # Install template
-  mkdir -p "$(dirname "$hook_dest")" || true
-  if cp "$hook_src" "$hook_dest" 2>/dev/null; then
-    chmod +x "$hook_dest" 2>/dev/null || true
-    # Append invocation of backup hook (if existed) so prior behavior is preserved
-    if [ -f "$hook_dest.alpha-ci.bak" ]; then
-      cat >> "$hook_dest" <<'HOOK_APPEND'
-
-# Execute previous pre-push hook (backup)
-if [ -f "$HOOK_BACKUP" ]; then
-  echo "[alpha-ci] Running previous pre-push hook (backup)..."
-  bash "$HOOK_BACKUP" "$@" || true
-fi
-HOOK_APPEND
-      # Replace placeholder with actual backup path
-      sed -i "s|\$HOOK_BACKUP|$hook_dest.alpha-ci.bak|g" "$hook_dest" 2>/dev/null || true
-    fi
-    echo -e "  ${GREEN}✓${NC} pre-push hook installed at: $hook_dest"
-  else
-    echo -e "  ${YELLOW}⚠️  Could not install pre-push hook to $hook_dest (permissions?)${NC}"
-  fi
-}
-
-install_pre_push_hook_if_missing
 
 # ── Source detection ──
 source "$SCRIPTS_DIR/detect.sh"
@@ -498,34 +439,43 @@ case "$COMMAND" in
 
     summary "$OVERALL" "${RESULTS[@]}"
     sync_back_to_host
+    exit "$OVERALL"
     ;;
 
   security)
     banner
     detect_project
     run_stage "Security Scan" "run-security.sh" "🔐"
+    EXIT_CODE=$?
     sync_back_to_host
+    exit $EXIT_CODE
     ;;
 
   lint)
     banner
     detect_project
     run_stage "Lint" "run-lint.sh" "🔍"
+    EXIT_CODE=$?
     sync_back_to_host
+    exit $EXIT_CODE
     ;;
 
   test)
     banner
     detect_project
     run_stage "Unit Tests" "run-test.sh" "🧪"
+    EXIT_CODE=$?
     sync_back_to_host
+    exit $EXIT_CODE
     ;;
 
   build)
     banner
     detect_project
     run_stage "Build" "run-build.sh" "🏗"
+    EXIT_CODE=$?
     sync_back_to_host
+    exit $EXIT_CODE
     ;;
 
   e2e)

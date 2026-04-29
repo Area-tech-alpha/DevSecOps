@@ -4,7 +4,7 @@
 # ║                                                              ║
 # ║  Uso:                                                        ║
 # ║  irm https://raw.githubusercontent.com/Area-tech-alpha/      ║
-# ║    DevSecOps/main/cli/setup-auth.ps1 | iex                  ║
+# ║    DevSecOps/main/cli/setup-auth.ps1 | iex                   ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 $ErrorActionPreference = "Stop"
@@ -69,7 +69,8 @@ if (-not $ghToken) {
 if (-not $ghToken -and (Test-Path $npmrcGlobal)) {
     $match = Select-String -Path $npmrcGlobal -Pattern '//npm\.pkg\.github\.com/:_authToken=(.+)' -ErrorAction SilentlyContinue
     if ($match) {
-        $ghToken = $match.Matches[0].Groups[1].Value.Trim()
+        # Limpeza nuclear: remove TUDO que não for alfanumérico ou os separadores permitidos
+        $ghToken = $match.Matches[0].Groups[1].Value -replace '[^a-zA-Z0-9_.-]', ''
         Write-Host "  ✓ Token encontrado no .npmrc global" -ForegroundColor Green
     }
 }
@@ -89,17 +90,60 @@ if (-not $ghToken) {
         Write-Host "`n  ❌ Nenhum token fornecido. Abortando." -ForegroundColor Red
         exit 1
     }
+    $ghToken = $ghToken -replace '[^a-zA-Z0-9_.-]', ''
 }
 
-# ── Sempre pedir username se não foi detectado ──
-if (-not $ghUsername) {
-    Write-Host ""
-    $ghUsername = Read-Host "  Digite seu usuário do GitHub"
+# ── Validação Ativa do Token ──
+Write-Host "  🔍 Validando token contra a API do GitHub..." -ForegroundColor Cyan
 
-    if (-not $ghUsername) {
-        Write-Host "`n  ❌ Nenhum usuário fornecido. Abortando." -ForegroundColor Red
+try {
+    $headers = @{ "Authorization" = "token $ghToken" }
+    $response = Invoke-WebRequest -Uri "https://api.github.com/user" -Headers $headers -Method Get
+    $httpStatus = $response.StatusCode
+
+    if ($httpStatus -ne 200) {
+        Write-Host "  ❌ Token inválido ou expirado (HTTP $httpStatus)." -ForegroundColor Red
         exit 1
     }
+
+    # Extrair escopos
+    $scopes = $response.Headers["X-OAuth-Scopes"]
+    $displayScopes = if ($null -eq $scopes) { "none (fine-grained?)" } else { $scopes }
+    Write-Host "  ✓ Token válido. Scopes: $displayScopes" -ForegroundColor Green
+
+    # Se tiver admin, repo ou write:packages, ele já tem permissão de leitura
+    if (($scopes -notmatch "read:packages") -and ($scopes -notmatch "write:packages") -and ($scopes -notmatch "repo") -and ($scopes -notmatch "admin")) {
+        # Se o token for fine-grained (github_pat_), não bloqueamos por falta de header
+        if ($ghToken -notmatch "^github_pat_") {
+            Write-Host "  ⚠️  Aviso: O token pode não ter o escopo 'read:packages'." -ForegroundColor Yellow
+            Write-Host "     Se falhar com 403, revise os escopos em: https://github.com/settings/tokens" -ForegroundColor DarkGray
+        }
+    }
+
+    # Extrair username automaticamente se não tivermos
+    if (-not $ghUsername) {
+        $userJson = $response.Content | ConvertFrom-Json
+        $ghUsername = $userJson.login
+        Write-Host "  ✓ Usuário detectado: $ghUsername" -ForegroundColor Green
+    }
+
+    # Verificar acesso à Org e SSO
+    try {
+        $orgResponse = Invoke-WebRequest -Uri "https://api.github.com/orgs/Area-tech-alpha" -Headers $headers -Method Get
+    } catch {
+        Write-Host "" -ForegroundColor Red
+        Write-Host "  ⚠️  Possível problema de SSO ou Acesso à Org." -ForegroundColor Yellow
+        Write-Host "     Você deve autorizar este token para a organização 'Area-tech-alpha':" -ForegroundColor White
+        Write-Host "     → https://github.com/settings/tokens" -ForegroundColor Cyan
+        Write-Host "     Clique no seu token → 'Configure SSO' ao lado de 'Area-tech-alpha' → 'Authorize'" -ForegroundColor DarkGray
+        Write-Host ""
+        Read-Host "  Pressione ENTER após autorizar para continuar ou CTRL+C para sair..."
+    }
+
+} catch {
+    Write-Host "  ❌ Falha crítica na validação do token: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "     Verifique sua conexão e o token em: https://github.com/settings/tokens" -ForegroundColor DarkGray
+    exit 1
 }
 
 Write-Host ""
@@ -121,12 +165,34 @@ if ((Test-Path $npmrcLocal) -and ($npmrcLocal -ne $npmrcGlobal)) {
     }
 }
 
-# Configura via npm config (grava no .npmrc global automaticamente)
-npm config set @area-tech-alpha:registry https://npm.pkg.github.com 2>$null
-npm config set //npm.pkg.github.com/:_authToken $ghToken 2>$null
+# Higieniza o .npmrc (remove entradas conflitantes ou malformadas no Windows)
+try {
+    if (Test-Path $npmrcGlobal) {
+        $content = Get-Content $npmrcGlobal -ErrorAction SilentlyContinue
+        if ($content) {
+            $newContent = $content | Where-Object {
+                $_ -notmatch 'area-tech-alpha:registry' -and
+                $_ -notmatch 'npm\.pkg\.github\.com/:_authToken' -and
+                $_ -notmatch 'npm\.pkg\.github\.com/always-auth'
+            }
+            Set-Content -Path $npmrcGlobal -Value $newContent -ErrorAction SilentlyContinue
+        }
+    }
+} catch {
+    # Ignora falhas de limpeza (ex: arquivo travado)
+}
 
-Write-Host "  ✓ Registry @area-tech-alpha → npm.pkg.github.com" -ForegroundColor Green
-Write-Host "  ✓ Auth token configurado no .npmrc global" -ForegroundColor Green
+# Configura via npm config (grava no .npmrc global automaticamente)
+Write-Host "  ⚙️  Configurando registry e token..." -ForegroundColor Cyan
+npm config set @area-tech-alpha:registry https://npm.pkg.github.com
+npm config set //npm.pkg.github.com/:_authToken $ghToken
+
+# Injeta always-auth diretamente no arquivo (evita erro no npm v9+)
+Add-Content -Path $npmrcGlobal -Value "always-auth=true"
+
+Write-Host "  ✓ Registry @area-tech-alpha configurado" -ForegroundColor Green
+Write-Host "  ✓ Auth token injetado e higienizado" -ForegroundColor Green
+Write-Host "  ✓ always-auth = true (enforced)" -ForegroundColor Green
 
 # Verifica se funcionou
 Write-Host ""
@@ -135,11 +201,12 @@ try {
     $viewResult = npm view @area-tech-alpha/alpha-ci version 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  ✓ Acesso validado! Versão disponível: $viewResult" -ForegroundColor Green
-    } else {
+        } else {
         Write-Host "  ⚠ Não foi possível validar o acesso. Verifique o token." -ForegroundColor Yellow
-        Write-Host "    Se o erro persistir, autorize o token para a org:" -ForegroundColor DarkGray
+        Write-Host "    Se o erro for 403 (Forbidden), você DEVE autorizar o token para SSO:" -ForegroundColor DarkGray
         Write-Host "    → https://github.com/settings/tokens" -ForegroundColor Cyan
-        Write-Host "    → Clique no token → Authorize para 'Area-tech-alpha'" -ForegroundColor DarkGray
+        Write-Host "    → Clique no seu token → 'Configure SSO' (ao lado de 'Area-tech-alpha')" -ForegroundColor DarkGray
+        Write-Host "    → Clique em 'Authorize'" -ForegroundColor DarkGray
     }
 } catch {
     Write-Host "  ⚠ Validação ignorada (npm não respondeu)" -ForegroundColor Yellow
@@ -156,6 +223,19 @@ Write-Host ""
 
 if (Get-Command docker -ErrorAction SilentlyContinue) {
     Write-Host "  ✓ Docker detectado" -ForegroundColor Green
+
+    # Tenta verificar se o daemon está rodando
+    try {
+        $null = docker info 2>$null
+    } catch {
+        # Docker não está respondendo, tenta iniciar no Windows
+        $dockerPath = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
+        if (Test-Path $dockerPath) {
+            Write-Host "  🐳 Docker não está rodando. Tentando iniciar Docker Desktop..." -ForegroundColor Cyan
+            Start-Process $dockerPath
+            Write-Host "    Aguarde o Docker inicializar e rode o script novamente." -ForegroundColor DarkGray
+        }
+    }
 
     # Login no GHCR usando o token que já temos
     Write-Host "  🔑 Fazendo login no GitHub Container Registry..." -ForegroundColor Cyan
@@ -184,18 +264,33 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
 #  DONE
 # ══════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════
+#  STEP 4: Instalação Global
+# ══════════════════════════════════════════════════
+
+Write-Host "  ── Step 4/4: Instalando Alpha CI globalmente ──" -ForegroundColor Cyan
+Write-Host ""
+
+npm install -g @area-tech-alpha/alpha-ci
+
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "  ✓ Alpha CI instalado com sucesso!" -ForegroundColor Green
+} else {
+    Write-Host "  ⚠ Falha na instalação global. Tente rodar manually:" -ForegroundColor Yellow
+    Write-Host "    npm install -g @area-tech-alpha/alpha-ci" -ForegroundColor Cyan
+}
+
+Write-Host ""
+
+# ══════════════════════════════════════════════════
+#  DONE
+# ══════════════════════════════════════════════════
+
 Write-Host ""
 Write-Host "  ══════════════════════════════════════════════" -ForegroundColor Green
 Write-Host "  ✅ Setup concluído com sucesso!" -ForegroundColor Green
 Write-Host "  ══════════════════════════════════════════════" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Agora você pode usar:" -ForegroundColor White
-Write-Host "    npx @area-tech-alpha/alpha-ci all        # Pipeline completo" -ForegroundColor Cyan
-Write-Host "    npx @area-tech-alpha/alpha-ci security   # Scan de segurança" -ForegroundColor Cyan
-Write-Host "    npx @area-tech-alpha/alpha-ci lint       # Linting" -ForegroundColor Cyan
-Write-Host "    npx @area-tech-alpha/alpha-ci lint --fix # Auto-fix" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "  Ou instalar globalmente:" -ForegroundColor DarkGray
-Write-Host "    npm install -g @area-tech-alpha/alpha-ci" -ForegroundColor Cyan
+Write-Host "  Agora você pode usar em qualquer projeto:" -ForegroundColor White
 Write-Host "    alpha-ci all" -ForegroundColor Cyan
 Write-Host ""

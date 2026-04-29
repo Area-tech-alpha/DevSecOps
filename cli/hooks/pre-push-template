@@ -12,6 +12,21 @@ if [ -z "$REPO_ROOT" ]; then
 fi
 cd "$REPO_ROOT"
 
+print_auth_help() {
+  echo -e "\n\033[0;31m[alpha-ci] ERROR: Failed to execute @area-tech-alpha/alpha-ci.\033[0m"
+  echo "[alpha-ci] This usually means you are not authenticated to GitHub Packages."
+  echo "[alpha-ci] Run the setup script to fix this:"
+
+  if [[ "${OSTYPE:-}" == "msys" || "${OSTYPE:-}" == "cygwin" ]]; then
+    echo -e "\033[0;33m  (Windows PowerShell):\033[0m"
+    echo -e "\033[0;36m  irm https://raw.githubusercontent.com/Area-tech-alpha/DevSecOps/main/cli/setup-auth.ps1 | iex\033[0m"
+  else
+    echo -e "\033[0;33m  (Linux / macOS):\033[0m"
+    echo -e "\033[0;36m  bash <(curl -fsSL https://raw.githubusercontent.com/Area-tech-alpha/DevSecOps/main/cli/setup-auth.sh)\033[0m"
+  fi
+  echo ""
+}
+
 echo "[alpha-ci] Running pre-push checks..."
 
 run_alpha_ci() {
@@ -36,7 +51,9 @@ run_alpha_ci() {
   if command -v npm >/dev/null 2>&1; then
     echo "[alpha-ci] alpha-ci not found globally; running through npm exec without modifying this project..."
     npm exec --yes --package @area-tech-alpha/alpha-ci -- alpha-ci all
-    return $?
+    local exit_code=$?
+    [ "$exit_code" -ne 0 ] && print_auth_help
+    return "$exit_code"
   fi
 
   echo "[alpha-ci] alpha-ci not available and npm not found. Skipping checks (allow push)."

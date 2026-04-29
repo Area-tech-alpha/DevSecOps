@@ -5,7 +5,7 @@
 // ║  Permite: npx @area-tech-alpha/alpha-ci security             ║
 // ╚══════════════════════════════════════════════════════════════╝
 
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, realpathSync, copyFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { resolve, basename, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -78,11 +78,23 @@ let autoFix = false;
 let reportFormat = 'text';
 let reportOutput = '';
 
-// Security: Tokens are sourced ONLY from environment variables.
-// Passing secrets via CLI args leaks them into shell history,
-// process listings (ps aux), and audit logs.
+// Security: Tokens are sourced ONLY from environment variables or global .npmrc.
 const semgrepToken = process.env.SEMGREP_APP_TOKEN || '';
-const githubToken = process.env.GITHUB_TOKEN || process.env.NODE_AUTH_TOKEN || '';
+let githubToken = process.env.GITHUB_TOKEN || process.env.NODE_AUTH_TOKEN || '';
+
+// Fallback: If token not in env, try to extract from global .npmrc
+if (!githubToken && existsSync(GLOBAL_NPMRC)) {
+  try {
+    const npmrcContent = readFileSync(GLOBAL_NPMRC, 'utf-8');
+    // Match //npm.pkg.github.com/:_authToken=TOKEN
+    const match = npmrcContent.match(/\/\/npm\.pkg\.github\.com\/:_authToken=(.+)/);
+    if (match) {
+      githubToken = match[1].trim();
+    }
+  } catch (e) {
+    // Ignore read errors
+  }
+}
 
 // ── Allowed report formats (whitelist) ──
 const ALLOWED_FORMATS = new Set(['text', 'json', 'sarif']);
@@ -234,6 +246,54 @@ function validateTargetPath(p) {
 
 targetPath = validateTargetPath(targetPath);
 
+// ── Persistence: Auto-install pre-push hook on first run in a project ──
+(function installHookOnHost() {
+  try {
+    const auto = process.env.ALPHA_CI_AUTO_INSTALL_HOOK;
+    if (auto === 'false' || auto === '0') return;
+
+    // Proteção: não tenta atualizar o hook se ele já estiver rodando (evita race condition)
+    if (process.env.GIT_REFLOG_ACTION || process.env.GIT_DIR) return;
+
+    const hostGitDir = existsSync(resolve(targetPath, '.git')) ? resolve(targetPath, '.git') : null;
+    if (!hostGitDir) return;
+
+    const tpl = resolve(__dirname, '../hooks/pre-push-template');
+    const fallbackTpl = resolve(process.cwd(), 'cli/hooks/pre-push-template');
+
+    let src = null;
+    if (existsSync(tpl)) src = tpl;
+    else if (existsSync(fallbackTpl)) src = fallbackTpl;
+    else return;
+
+    const hooksDir = resolve(hostGitDir, 'hooks');
+    if (!existsSync(hooksDir)) mkdirSync(hooksDir, { recursive: true });
+
+    const dest = resolve(hooksDir, 'pre-push');
+
+    if (existsSync(dest)) {
+      const existingContent = readFileSync(dest, 'utf-8');
+
+      // If our marker is there AND shebang is at line 1
+      if (existingContent.includes('ALPHA-CI-HOOK') && existingContent.startsWith('#!')) {
+        // Optimization: check if the template core is actually different
+        const templateContent = ensureHookMarker(readFileSync(src, 'utf-8'));
+        if (existingContent === templateContent) return; // Already up to date
+      }
+
+      try { copyFileSync(dest, `${dest}.alpha-ci.bak`); } catch (e) {}
+    }
+
+    copyFileSync(src, dest);
+    const content = readFileSync(dest, 'utf-8');
+    writeFileSync(dest, ensureHookMarker(content), { mode: 0o755 });
+    chmodSync(dest, 0o755);
+    info(`🔧 Installed pre-push hook at ${dest}`);
+  } catch (e) {
+    // Silent fail unless verbose (validation path might be sensitive)
+  }
+})();
+
 // ── Security: Validate report output path ──
 function validateOutputPath(output, target) {
   if (!output) return '';
@@ -267,7 +327,19 @@ function dockerAvailable() {
   try {
     execFileSync('docker', ['info'], { stdio: 'ignore' });
     return true;
-  } catch { return false; }
+  } catch (e) {
+    // No Windows, tenta iniciar o Docker Desktop automaticamente
+    if (process.platform === 'win32') {
+      const dockerPath = 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe';
+      if (existsSync(dockerPath)) {
+        info('🐳 Docker não está rodando. Tentando iniciar Docker Desktop...');
+        try {
+          spawn(dockerPath, [], { detached: true, stdio: 'ignore' }).unref();
+        } catch (err) {}
+      }
+    }
+    return false;
+  }
 }
 
 function imageExists(img) {
@@ -407,8 +479,57 @@ function runNoDocker() {
   });
 }
 
+// ── Check and Auto-Update NPM Package ──
+async function checkForUpdates() {
+  try {
+    const autoUpdate = process.env.ALPHA_CI_AUTO_UPDATE !== 'false';
+
+    // Silent check: get latest version from registry
+    const latest = execFileSync('npm', ['view', '@area-tech-alpha/alpha-ci', 'version'], {
+      encoding: 'utf-8',
+      timeout: 3000,
+      env: { ...process.env, NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC }
+    }).trim();
+
+    if (latest && latest !== VERSION) {
+      if (autoUpdate) {
+        log(`${c.cyan}🔄 Atualizando alpha-ci para a versão ${latest}...${c.reset}`);
+        try {
+          // Detect if installed globally or locally (use spawnSync to check exit code)
+          const isGlobal = spawnSync('npm', ['list', '-g', '@area-tech-alpha/alpha-ci'], {
+            stdio: 'ignore',
+            env: { ...process.env, NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC }
+          }).status === 0;
+
+          const installArgs = isGlobal ? ['install', '-g', '@area-tech-alpha/alpha-ci@latest'] : ['install', '--no-save', '@area-tech-alpha/alpha-ci@latest'];
+
+          spawn('npm', installArgs, {
+            detached: true,
+            stdio: 'ignore',
+            env: { ...process.env, NPM_CONFIG_USERCONFIG: GLOBAL_NPMRC }
+          }).unref();
+
+          log(`${c.green}✅ Atualização iniciada em segundo plano. Será aplicada na próxima execução.${c.reset}\n`);
+        } catch (e) {
+          log(`${c.yellow}⚠️  Não foi possível auto-atualizar. Execute manualmente: npm install -g @area-tech-alpha/alpha-ci${c.reset}\n`);
+        }
+      } else {
+        log(`${c.yellow}${c.bold}🔔 Nova versão disponível: ${latest} (atual: ${VERSION})${c.reset}`);
+        log(`${c.dim}   Execute: npm install -g @area-tech-alpha/alpha-ci${c.reset}\n`);
+      }
+    }
+  } catch (e) {
+    // Ignore update check failures
+  }
+}
+
 // ── Run ──
 async function run() {
+  // Check for updates in the background (don't block start)
+  if (!args.includes('--version')) {
+    checkForUpdates();
+  }
+
   // --no-docker mode
   if (noDocker) {
     return runNoDocker();
@@ -431,9 +552,9 @@ async function run() {
     if (image === IMAGE && !rebuild) {
       try {
         log(`${c.dim}ℹ️  Verificando atualizações da imagem Docker...${c.reset}`);
-        execFileSync('docker', ['pull', IMAGE], { stdio: 'ignore' });
-      } catch {
-        // Ignora erro (offline ou timeout) e usa cache
+        execFileSync('docker', ['pull', IMAGE], { stdio: 'ignore', timeout: 15000 });
+      } catch (e) {
+        // Ignora erro (offline, timeout ou interrupção) e usa cache
       }
     }
   }
@@ -443,49 +564,6 @@ async function run() {
   info(`🐳 Image: ${image}`);
   info(`🚀 Command: ${command}`);
   log('');
-
-  // Attempt to install pre-push hook on the host repository (runs on host)
-  (function installHookOnHost() {
-    try {
-      const auto = process.env.ALPHA_CI_AUTO_INSTALL_HOOK;
-      if (auto === 'false' || auto === '0') return;
-
-      const hostGitDir = existsSync(`${targetPath}/.git`) ? `${targetPath}/.git` : null;
-      if (!hostGitDir) return;
-
-      // Try to find hook template relative to the CLI package (../hooks/pre-push-template)
-      const tpl = resolve(__dirname, '../hooks/pre-push-template');
-      // When running from global install, template may not exist. Also try repo relative path.
-      const fallbackTpl = resolve(process.cwd(), 'cli/hooks/pre-push-template');
-
-      let src = null;
-      if (existsSync(tpl)) src = tpl;
-      else if (existsSync(fallbackTpl)) src = fallbackTpl;
-      else return;
-
-      const hooksDir = `${targetPath}/.git/hooks`;
-      try { mkdirSync(hooksDir, { recursive: true }); } catch (e) {}
-
-      const dest = `${hooksDir}/pre-push`;
-
-      // If already installed and contains marker, skip
-      if (existsSync(dest)) {
-        const content = readFileSync(dest, 'utf-8');
-        if (content.includes('ALPHA-CI-HOOK')) return;
-        // backup
-        try { copyFileSync(dest, `${dest}.alpha-ci.bak`); } catch (e) {}
-      }
-
-      // Copy template and add marker
-      copyFileSync(src, dest);
-      const existing = readFileSync(dest, 'utf-8');
-      writeFileSync(dest, ensureHookMarker(existing), { mode: 0o755 });
-      chmodSync(dest, 0o755);
-      info(`🔧 Installed pre-push hook at ${dest}`);
-    } catch (e) {
-      if (verbose) console.error('Hook install error:', e.message || e);
-    }
-  })();
 
   // Create secure env file (prevents token leakage via ps/docker inspect)
   const envFile = createEnvFile();

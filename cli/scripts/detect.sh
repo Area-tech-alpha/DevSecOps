@@ -13,6 +13,7 @@ IS_PYTHON=false
 IS_GO=false
 IS_DOCKER=false
 IS_MONOREPO=false
+IS_SWC=false
 MONOREPO_DIRS=""
 NODE_RUNNER=""
 HAS_NODE_TEST=false
@@ -40,6 +41,12 @@ detect_project() {
     if [ -f tsconfig.json ]; then
       IS_TYPESCRIPT=true
       echo -e "  ${GREEN}✓${NC} TypeScript detectado"
+    fi
+
+    # SWC?
+    if [ -f .swcrc ] || grep -q '"@swc/cli"' package.json 2>/dev/null || grep -q '"@swc/core"' package.json 2>/dev/null; then
+      IS_SWC=true
+      echo -e "  ${GREEN}✓${NC} SWC detectado"
     fi
 
     # ── Monorepo Detection ──
@@ -145,7 +152,7 @@ detect_project() {
   fi
 
   # Export all vars
-  export IS_NODE IS_REACT IS_TYPESCRIPT IS_PYTHON IS_GO IS_DOCKER IS_MONOREPO MONOREPO_DIRS
+  export IS_NODE IS_REACT IS_TYPESCRIPT IS_PYTHON IS_GO IS_DOCKER IS_MONOREPO MONOREPO_DIRS IS_SWC
   export NODE_RUNNER HAS_NODE_TEST HAS_PYTHON_TEST HAS_GO_TEST E2E_FRAMEWORK
 
   echo ""
