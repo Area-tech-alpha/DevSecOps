@@ -254,8 +254,8 @@ bash /path/to/DevSecOps/cli/hooks/install-hook.sh
 ```
 
 Observações:
-- O hook tenta usar `./node_modules/.bin/alpha-ci` ou `alpha-ci` global se disponível.
-- Se não encontrar, ele executa `npm install --no-save @area-tech-alpha/alpha-ci` automaticamente na primeira execução para facilitar a configuração.
+- O hook tenta usar `alpha-ci` global ou `./node_modules/.bin/alpha-ci` se disponível.
+- Se não encontrar, ele usa `npm exec --yes --package @area-tech-alpha/alpha-ci -- alpha-ci all`, sem instalar pacotes dentro do projeto.
 - Se o pipeline falhar, o push é abortado.
 
 ---

@@ -32,4 +32,4 @@ cp "$TEMPLATE" "$HOOK_PATH"
 chmod +x "$HOOK_PATH"
 
 echo "Installed alpha-ci pre-push hook to: $HOOK_PATH"
-echo "If this is the first time, the hook will install alpha-ci locally into the project (using 'npm install --no-save') when it runs."
+echo "The hook runs alpha-ci without installing packages into the target project."

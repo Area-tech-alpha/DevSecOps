@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
+# ALPHA-CI-HOOK: installed by alpha-ci
 set -euo pipefail
 
 # Alpha CI — pre-push git hook template
-# Instala localmente (se necessário) e executa o pipeline (bloqueia o push em falha)
+# Executa o pipeline sem instalar pacotes dentro do repositório alvo.
 
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [ -z "$REPO_ROOT" ]; then
@@ -13,30 +14,39 @@ cd "$REPO_ROOT"
 
 echo "[alpha-ci] Running pre-push checks..."
 
-# Prefer local project bin, then global, else attempt to install locally (--no-save)
-ALPHA_CI_CMD=""
-if [ -x "./node_modules/.bin/alpha-ci" ]; then
-  ALPHA_CI_CMD="./node_modules/.bin/alpha-ci"
-elif command -v alpha-ci >/dev/null 2>&1; then
-  ALPHA_CI_CMD="alpha-ci"
-else
-  if command -v npm >/dev/null 2>&1; then
-    echo "[alpha-ci] alpha-ci not found — installing locally (npm install --no-save @area-tech-alpha/alpha-ci)"
-    npm install --no-save @area-tech-alpha/alpha-ci >/dev/null 2>&1 || true
-    if [ -x "./node_modules/.bin/alpha-ci" ]; then
-      ALPHA_CI_CMD="./node_modules/.bin/alpha-ci"
-    fi
+run_alpha_ci() {
+  if [ -n "${ALPHA_CI_CMD:-}" ]; then
+    echo "[alpha-ci] Executing: ${ALPHA_CI_CMD} all"
+    "${ALPHA_CI_CMD}" all
+    return $?
   fi
-fi
 
-if [ -z "${ALPHA_CI_CMD}" ]; then
-  echo "[alpha-ci] alpha-ci not available and could not be installed. Skipping checks (allow push)."
-  exit 0
-fi
+  if command -v alpha-ci >/dev/null 2>&1; then
+    echo "[alpha-ci] Executing: alpha-ci all"
+    alpha-ci all
+    return $?
+  fi
 
-echo "[alpha-ci] Executing: $ALPHA_CI_CMD all"
-"$ALPHA_CI_CMD" all
+  if [ -x "./node_modules/.bin/alpha-ci" ]; then
+    echo "[alpha-ci] Executing: ./node_modules/.bin/alpha-ci all"
+    ./node_modules/.bin/alpha-ci all
+    return $?
+  fi
+
+  if command -v npm >/dev/null 2>&1; then
+    echo "[alpha-ci] alpha-ci not found globally; running through npm exec without modifying this project..."
+    npm exec --yes --package @area-tech-alpha/alpha-ci -- alpha-ci all
+    return $?
+  fi
+
+  echo "[alpha-ci] alpha-ci not available and npm not found. Skipping checks (allow push)."
+  return 0
+}
+
+set +e
+run_alpha_ci
 EXIT_CODE=$?
+set -e
 
 if [ $EXIT_CODE -ne 0 ]; then
   echo "[alpha-ci] Pipeline failed (exit $EXIT_CODE). Aborting push."

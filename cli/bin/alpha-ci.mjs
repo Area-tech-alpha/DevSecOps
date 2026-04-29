@@ -9,10 +9,12 @@ import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, realpathSync, copyFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { resolve, basename, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
 const IMAGE = 'ghcr.io/area-tech-alpha/alpha-ci:latest';
 const IMAGE_LOCAL = 'alpha-ci:latest';
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf-8')).version;
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── Resolve global .npmrc path (never use local .npmrc from consumer projects) ──
 import { homedir } from 'node:os';
@@ -37,6 +39,20 @@ const log = (msg) => console.log(msg);
 const error = (msg) => console.error(`${c.red}${msg}${c.reset}`);
 const info = (msg) => console.log(`${c.cyan}${msg}${c.reset}`);
 /* eslint-enable no-console */
+
+function ensureHookMarker(content) {
+  const marker = '# ALPHA-CI-HOOK: installed by alpha-ci\n';
+  if (content.includes('ALPHA-CI-HOOK')) return content;
+
+  if (content.startsWith('#!')) {
+    const firstLineEnd = content.indexOf('\n');
+    if (firstLineEnd !== -1) {
+      return content.slice(0, firstLineEnd + 1) + marker + content.slice(firstLineEnd + 1);
+    }
+  }
+
+  return marker + content;
+}
 
 // ── Allowed commands (whitelist) ──
 const ALLOWED_COMMANDS = new Set([
@@ -293,7 +309,7 @@ function pullOrBuild() {
 function findCliDir() {
   // Check if we're inside the DevSecOps repo
   const candidates = [
-    resolve(import.meta.dirname, '..'),
+    resolve(__dirname, '..'),
     resolve(process.env.HOME || '', 'DevSecOps/cli'),
     '/opt/alpha-ci',
   ];
@@ -337,7 +353,7 @@ function runNoDocker() {
   let localRunner = null;
   const candidates = [
     scriptsDir ? resolve(scriptsDir, 'run-local.sh') : null,
-    resolve(import.meta.dirname, '..', 'scripts', 'run-local.sh'),
+    resolve(__dirname, '..', 'scripts', 'run-local.sh'),
   ].filter(Boolean);
 
   for (const candidate of candidates) {
@@ -438,9 +454,7 @@ async function run() {
       if (!hostGitDir) return;
 
       // Try to find hook template relative to the CLI package (../hooks/pre-push-template)
-      const templatePath = resolve(import.meta.url, '../hooks/pre-push-template');
-      // import.meta.url returns file://... ; transform to path
-      const tpl = templatePath.replace('file://', '');
+      const tpl = resolve(__dirname, '../hooks/pre-push-template');
       // When running from global install, template may not exist. Also try repo relative path.
       const fallbackTpl = resolve(process.cwd(), 'cli/hooks/pre-push-template');
 
@@ -464,10 +478,8 @@ async function run() {
 
       // Copy template and add marker
       copyFileSync(src, dest);
-      // Prepend marker comment for idempotency
-      const marker = '# ALPHA-CI-HOOK: installed by alpha-ci\n';
       const existing = readFileSync(dest, 'utf-8');
-      writeFileSync(dest, marker + existing, { mode: 0o755 });
+      writeFileSync(dest, ensureHookMarker(existing), { mode: 0o755 });
       chmodSync(dest, 0o755);
       info(`🔧 Installed pre-push hook at ${dest}`);
     } catch (e) {
