@@ -549,6 +549,11 @@ case "$COMMAND" in
     exit 0
     ;;
 
+  --version)
+    echo "alpha-ci (container)"
+    exit 0
+    ;;
+
   *)
     echo -e "${RED}❌ Unknown command: ${COMMAND}${NC}"
     usage

@@ -22,6 +22,18 @@ irm https://raw.githubusercontent.com/Area-tech-alpha/DevSecOps/main/cli/setup-a
 
 > O script detecta automaticamente o token do GitHub CLI (`gh auth token`), variáveis de ambiente, ou pede interativamente.
 
+**Flags opcionais do setup-auth:**
+```bash
+# Pular configuração Docker (se não usa Docker)
+bash <(curl -fsSL .../setup-auth.sh) --skip-docker
+
+# Pular instalação global (se quer instalar manualmente)
+bash <(curl -fsSL .../setup-auth.sh) --skip-install
+
+# PowerShell equivalente:
+irm .../setup-auth.ps1 -OutFile setup.ps1; .\setup.ps1 -SkipDocker -SkipInstall
+```
+
 ---
 
 ### Opção 1: Instalação Global (Recomendado)
@@ -109,6 +121,15 @@ alpha-ci lint --no-docker --fix
 ```
 
 > ⚠️ Tokens (`GITHUB_TOKEN`, `SEMGREP_APP_TOKEN`) devem ser passados **exclusivamente via variáveis de ambiente** por segurança. Flags `--semgrep-token` e `--github-token` foram removidos.
+
+**Environment Variables adicionais:**
+
+| Variável | Descrição |
+|----------|----------|
+| `ALPHA_CI_DOCKER_PULL_TIMEOUT` | Timeout em ms para pull da imagem Docker (default: 15000) |
+| `ALPHA_CI_CHECK_UPDATES` | `true` para verificar atualizações ao rodar |
+| `ALPHA_CI_AUTO_UPDATE` | `true` para auto-atualizar em background |
+| `ALPHA_CI_AUTO_INSTALL_HOOK` | `false` para desativar instalação automática do pre-push hook |
 
 ---
 
