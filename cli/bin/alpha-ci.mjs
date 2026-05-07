@@ -159,8 +159,8 @@ if (command === 'help' || command === '--help' || command === '-h') {
   log(`
 ${c.magenta}${c.bold}  ╔═══════════════════════════════════════════════════════╗
   ║                                                       ║
-  ║   🛡️  ${c.white}Alpha CI${c.magenta} — DevSecOps Pipeline              ║
-  ║   ${c.dim}Area Tech Alpha · Local Runner${c.reset}${c.magenta}${c.bold}                  ║
+  ║   🛡️  ${c.white}Alpha CI${c.magenta} — DevSecOps Pipeline                  ║
+  ║   ${c.dim}Area Tech Alpha · Local Runner${c.reset}${c.magenta}${c.bold}                       ║
   ║                                                       ║
   ╚═══════════════════════════════════════════════════════╝${c.reset}
   ${c.gray}v${VERSION}${c.reset}

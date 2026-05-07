@@ -14,57 +14,40 @@ jobs:
   lint:
     name: "Universal Lint"
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
-      # --------------------------------
-      # Checkout global
-      # --------------------------------
       - name: Checkout Target Repo
         uses: actions/checkout@v4
 
       # --------------------------------
-      # Setup de Cache universal
-      # --------------------------------
-      - name: Cache node_modules
-        id: cache-nm
-        uses: actions/cache@v4
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-modules-
-
-      # --------------------------------
-      # Detect project type
+      # Detect project type & Manager
       # --------------------------------
       - name: Detect project type
         id: detect
         run: |
           if [ -s package.json ] && jq -e . package.json >/dev/null 2>&1; then
             echo "node=true" >> $GITHUB_OUTPUT
+            if [ -f pnpm-lock.yaml ] || grep -q "workspace:" package.json; then
+              echo "manager=pnpm" >> $GITHUB_OUTPUT
+            elif [ -f yarn.lock ]; then
+              echo "manager=yarn" >> $GITHUB_OUTPUT
+            else
+              echo "manager=npm" >> $GITHUB_OUTPUT
+            fi
           fi
-
           if [ -f requirements.txt ] || [ -f pyproject.toml ]; then
             echo "python=true" >> $GITHUB_OUTPUT
           fi
 
-          if [ -f Dockerfile ]; then
-            echo "docker=true" >> $GITHUB_OUTPUT
-          fi
-
-      # =====================================================
-      # NODE / TYPESCRIPT LINTING
-      # =====================================================
-
-      - name: Checkout DevSecOps Config (Node)
-        if: steps.detect.outputs.node == 'true'
-        uses: actions/checkout@v4
+      # --------------------------------
+      # Setup Managers
+      # --------------------------------
+      - name: Setup pnpm
+        if: steps.detect.outputs.manager == 'pnpm'
+        uses: pnpm/action-setup@v4
         with:
-          repository: Area-tech-alpha/DevSecOps
-          ref: main
-          path: devsecops
-          fetch-depth: 1
+          version: 9
 
       - name: Setup Node
         if: steps.detect.outputs.node == 'true'
@@ -74,6 +57,21 @@ jobs:
           registry-url: https://npm.pkg.github.com
           scope: '@area-tech-alpha'
 
+      # --------------------------------
+      # Cache & Auth
+      # --------------------------------
+      - name: Cache node_modules
+        id: cache-nm
+        if: steps.detect.outputs.node == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.pnpm-store
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('**/package-lock.json', '**/pnpm-lock.yaml', '**/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
       - name: Create .npmrc for Auth
         if: steps.detect.outputs.node == 'true' && steps.cache-nm.outputs.cache-hit != 'true'
         run: |
@@ -82,11 +80,18 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # --------------------------------
+      # Dependencies
+      # --------------------------------
       - name: Install Project Dependencies (Node)
         if: steps.detect.outputs.node == 'true' && steps.cache-nm.outputs.cache-hit != 'true'
         run: |
-          echo "📦 Installing project dependencies (cache miss)"
-          if [ -f package-lock.json ]; then
+          echo "📦 Installing project dependencies (cache miss) using ${{ steps.detect.outputs.manager }}"
+          if [ "${{ steps.detect.outputs.manager }}" == "pnpm" ]; then
+            pnpm install --no-frozen-lockfile
+          elif [ "${{ steps.detect.outputs.manager }}" == "yarn" ]; then
+            yarn install --frozen-lockfile || yarn install
+          elif [ -f package-lock.json ]; then
             npm ci --legacy-peer-deps || npm install --legacy-peer-deps
           else
             npm install --legacy-peer-deps
@@ -94,25 +99,30 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # --------------------------------
+      # Linting Tools (Isolated)
+      # --------------------------------
+      - name: Checkout DevSecOps Config
+        if: steps.detect.outputs.node == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: Area-tech-alpha/DevSecOps
+          ref: main
+          path: devsecops
+          fetch-depth: 1
+
       - name: Install Lint Tools (Node)
         if: steps.detect.outputs.node == 'true'
         run: |
-          # Isola as ferramentas do DevSecOps das dependências do projeto alvo
-          # Isso evita conflitos de versão do AJV ou ESLint Legacy
+          # Isolate tool dependencies from project dependencies
           cd devsecops/lint
           npm init -y
           npm install --no-save --legacy-peer-deps \
-            eslint@9 \
-            @eslint/js \
-            typescript \
-            typescript-eslint \
-            eslint-config-prettier \
-            globals
+            eslint@9 @eslint/js typescript typescript-eslint eslint-config-prettier globals
 
       - name: Run ESLint (Node)
         if: steps.detect.outputs.node == 'true'
         run: |
-          # Força o uso do Flat Config e usa o binário isolado
           export ESLINT_USE_FLAT_CONFIG=true
           ./devsecops/lint/node_modules/.bin/eslint . \
             --config devsecops/lint/eslint.config.mjs \
@@ -124,7 +134,6 @@ jobs:
       # =====================================================
       # PYTHON LINTING
       # =====================================================
-
       - name: Setup Python
         if: steps.detect.outputs.python == 'true'
         uses: actions/setup-python@v4
@@ -140,7 +149,5 @@ jobs:
       - name: Run Ruff (Python Linter)
         if: steps.detect.outputs.python == 'true'
         run: |
-          echo "🔎 Running Ruff (Linting + Format check)"
+          echo "🔎 Running Ruff"
           ruff check .
-
-      # Docker linting removed as requested to avoid Alpine version pinning issues
