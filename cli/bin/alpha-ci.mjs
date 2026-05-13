@@ -6,7 +6,7 @@
 // ╚══════════════════════════════════════════════════════════════╝
 
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, realpathSync, copyFileSync, mkdirSync, chmodSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, realpathSync, copyFileSync, mkdirSync, chmodSync, statSync } from 'node:fs';
 import { resolve, basename, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -31,14 +31,25 @@ const GLOBAL_NPMRC = getGlobalNpmrc();
 const c = {
   red: '\x1b[31m', green: '\x1b[32m', yellow: '\x1b[33m',
   blue: '\x1b[34m', cyan: '\x1b[36m', magenta: '\x1b[35m',
-  bold: '\x1b[1m', dim: '\x1b[2m', reset: '\x1b[0m',
+  white: '\x1b[37m', gray: '\x1b[90m',
+  bold: '\x1b[1m', dim: '\x1b[2m', underline: '\x1b[4m',
+  reset: '\x1b[0m',
+  // Background colors for status badges
+  bgGreen: '\x1b[42m', bgRed: '\x1b[41m', bgYellow: '\x1b[43m',
+  bgMagenta: '\x1b[45m', bgCyan: '\x1b[46m',
+  black: '\x1b[30m',
 };
 
 /* eslint-disable no-console -- CLI tool: console is the primary output interface */
 const log = (msg) => console.log(msg);
 const error = (msg) => console.error(`${c.red}${msg}${c.reset}`);
 const info = (msg) => console.log(`${c.cyan}${msg}${c.reset}`);
+const success = (msg) => console.log(`${c.green}${msg}${c.reset}`);
+const badge = (bg, text) => `${bg}${c.black}${c.bold} ${text} ${c.reset}`;
 /* eslint-enable no-console */
+
+// ── Timer ──
+const startTime = Date.now();
 
 function ensureHookMarker(content) {
   const marker = '# ALPHA-CI-HOOK: installed by alpha-ci\n';
@@ -146,67 +157,84 @@ for (let i = 1; i < args.length; i++) {
 
 if (command === 'help' || command === '--help' || command === '-h') {
   log(`
-${c.magenta}${c.bold}  ╔═══════════════════════════════════════════════╗
-  ║     🛡️  Alpha CI — DevSecOps Pipeline         ║
-  ║     Area Tech Alpha · Local Runner            ║
-  ╚═══════════════════════════════════════════════╝${c.reset}
+${c.magenta}${c.bold}  ╔═══════════════════════════════════════════════════════╗
+  ║                                                       ║
+  ║   🛡️  ${c.white}Alpha CI${c.magenta} — DevSecOps Pipeline                  ║
+  ║   ${c.dim}Area Tech Alpha · Local Runner${c.reset}${c.magenta}${c.bold}                       ║
+  ║                                                       ║
+  ╚═══════════════════════════════════════════════════════╝${c.reset}
+  ${c.gray}v${VERSION}${c.reset}
 
-  ${c.dim}v${VERSION}${c.reset}
+  ${c.bold}${c.underline}USAGE${c.reset}
 
-${c.bold}Usage:${c.reset} alpha-ci <command> [options]
+    ${c.white}$${c.reset} ${c.cyan}alpha-ci${c.reset} ${c.yellow}<command>${c.reset} ${c.dim}[options]${c.reset}
 
-${c.bold}Commands:${c.reset}
-  ${c.cyan}all${c.reset}         Pipeline completo (security → lint → test → build)
-  ${c.cyan}security${c.reset}    Scanners de segurança (Gitleaks + OSV + Semgrep)
-  ${c.cyan}lint${c.reset}        Linting (ESLint / Ruff / golangci-lint)
-  ${c.cyan}test${c.reset}        Testes unitários (Jest/Vitest/pytest/go test)
-  ${c.cyan}build${c.reset}       Build do projeto
-  ${c.cyan}e2e${c.reset}         Testes E2E (Playwright / Cypress)
-  ${c.cyan}shell${c.reset}       Shell interativo no container
-  ${c.cyan}detect${c.reset}      Apenas detecta o tipo de projeto
+  ${c.bold}${c.underline}COMMANDS${c.reset}
 
-${c.bold}Options:${c.reset}
-  ${c.yellow}-p, --path <dir>${c.reset}          Repositório alvo (default: pwd)
-  ${c.yellow}-v, --verbose${c.reset}             Output detalhado
-  ${c.yellow}--no-docker${c.reset}               Roda sem Docker (requer tools instaladas)
-  ${c.yellow}--fix${c.reset}                     Auto-fix problemas de lint
-  ${c.yellow}--format <json|sarif|text>${c.reset} Formato do output (default: text)
-  ${c.yellow}--output <file>${c.reset}            Salva relatório em arquivo
-  ${c.yellow}--rebuild${c.reset}                 Força rebuild da imagem Docker
-  ${c.yellow}--version${c.reset}                 Mostra a versão
+    ${c.cyan}all${c.reset}        ${c.dim}│${c.reset} Pipeline completo ${c.dim}(security → lint → test → build)${c.reset}
+    ${c.cyan}security${c.reset}   ${c.dim}│${c.reset} Scanners de segurança ${c.dim}(Gitleaks + OSV + Semgrep)${c.reset}
+    ${c.cyan}lint${c.reset}       ${c.dim}│${c.reset} Linting ${c.dim}(ESLint / Ruff / golangci-lint)${c.reset}
+    ${c.cyan}test${c.reset}       ${c.dim}│${c.reset} Testes unitários ${c.dim}(Jest / Vitest / pytest / go test)${c.reset}
+    ${c.cyan}build${c.reset}      ${c.dim}│${c.reset} Build do projeto
+    ${c.cyan}e2e${c.reset}        ${c.dim}│${c.reset} Testes E2E ${c.dim}(Playwright / Cypress)${c.reset}
+    ${c.cyan}shell${c.reset}      ${c.dim}│${c.reset} Shell interativo no container
+    ${c.cyan}detect${c.reset}     ${c.dim}│${c.reset} Detecta tipo do projeto
 
-${c.bold}Examples:${c.reset}
-  ${c.dim}# Scan de segurança no repo atual${c.reset}
-  alpha-ci security
+  ${c.bold}${c.underline}OPTIONS${c.reset}
 
-  ${c.dim}# Pipeline completo em outro repo${c.reset}
-  alpha-ci all --path ../meu-projeto
+    ${c.yellow}-p, --path ${c.dim}<dir>${c.reset}          Repositório alvo ${c.dim}(default: pwd)${c.reset}
+    ${c.yellow}-v, --verbose${c.reset}              Output detalhado
+    ${c.yellow}--no-docker${c.reset}                Roda sem Docker ${c.dim}(requer tools locais)${c.reset}
+    ${c.yellow}--fix${c.reset}                      Auto-fix problemas de lint
+    ${c.yellow}--format ${c.dim}<json|sarif|text>${c.reset} Formato do output ${c.dim}(default: text)${c.reset}
+    ${c.yellow}--output ${c.dim}<file>${c.reset}            Salva relatório em arquivo
+    ${c.yellow}--rebuild${c.reset}                  Força rebuild da imagem Docker
+    ${c.yellow}--version${c.reset}                  Mostra a versão
 
-  ${c.dim}# Lint com auto-fix${c.reset}
-  alpha-ci lint --fix
+  ${c.bold}${c.underline}EXAMPLES${c.reset}
 
-  ${c.dim}# Security scan com output JSON${c.reset}
-  alpha-ci security --format json --output report.json
+    ${c.dim}# Scan de segurança no repo atual${c.reset}
+    ${c.white}$${c.reset} ${c.cyan}alpha-ci security${c.reset}
 
-  ${c.dim}# Rodar sem Docker${c.reset}
-  alpha-ci security --no-docker
+    ${c.dim}# Pipeline completo em outro diretório${c.reset}
+    ${c.white}$${c.reset} ${c.cyan}alpha-ci all --path ../meu-projeto${c.reset}
 
-  ${c.dim}# Shell interativo para debug${c.reset}
-  alpha-ci shell
+    ${c.dim}# Lint com auto-fix + report JSON${c.reset}
+    ${c.white}$${c.reset} ${c.cyan}alpha-ci lint --fix --format json --output report.json${c.reset}
 
-${c.bold}Environment:${c.reset}
-  ${c.dim}GITHUB_TOKEN${c.reset}        GitHub PAT para packages privados
-  ${c.dim}SEMGREP_APP_TOKEN${c.reset}   Token do Semgrep para regras custom
-  ${c.dim}NODE_AUTH_TOKEN${c.reset}      Alias para GITHUB_TOKEN
+    ${c.dim}# Rodar sem Docker (tools locais)${c.reset}
+    ${c.white}$${c.reset} ${c.cyan}alpha-ci security --no-docker${c.reset}
+
+  ${c.bold}${c.underline}ENVIRONMENT${c.reset}
+
+    ${c.green}GITHUB_TOKEN${c.reset}         ${c.dim}│${c.reset} GitHub PAT para packages privados
+    ${c.green}SEMGREP_APP_TOKEN${c.reset}    ${c.dim}│${c.reset} Token do Semgrep para regras custom
+    ${c.green}NODE_AUTH_TOKEN${c.reset}      ${c.dim}│${c.reset} Alias para GITHUB_TOKEN
+
+  ${c.bold}${c.underline}SETUP${c.reset} ${c.dim}(execute uma única vez)${c.reset}
+
+    ${c.white}$${c.reset} ${c.cyan}bash <(curl -fsSL https://raw.githubusercontent.com/\n      Area-tech-alpha/DevSecOps/main/cli/setup-auth.sh)${c.reset}
+
+  ${c.dim}─────────────────────────────────────────────────${c.reset}
+  ${c.dim}💡 Dica: Use ${c.white}alpha-ci all${c.dim} antes de cada push.${c.reset}
+  ${c.dim}   O pre-push hook é instalado automaticamente.${c.reset}
 `);
   process.exit(0);
 }
 
 // ── Validate target path ──
+
 if (!existsSync(targetPath)) {
   error(`❌ Diretório não encontrado: ${targetPath}`);
   process.exit(1);
 }
+try {
+  if (!statSync(targetPath).isDirectory()) {
+    error(`❌ O caminho informado não é um diretório: ${targetPath}`);
+    error(`   Use -p/--path para apontar para a raiz do repositório.`);
+    process.exit(1);
+  }
+} catch { /* statSync error already handled above */ }
 
 // ── Security: Validate target path against path traversal ──
 function validateTargetPath(p) {
@@ -460,8 +488,14 @@ function runNoDocker() {
   }
 
   const repoName = basename(targetPath);
-  info(`🎯 Target: ${repoName} (${targetPath})`);
-  info(`🚀 Command: ${command} (no-docker)`);
+  log('');
+  log(`  ${c.magenta}${c.bold}🛡️  Alpha CI${c.reset} ${c.gray}v${VERSION}${c.reset}  ${badge(c.bgYellow, 'NO-DOCKER')}`);
+  log(`  ${c.gray}${'─'.repeat(48)}${c.reset}`);
+  log(`  ${c.white}📂 Projeto${c.reset}  ${c.bold}${repoName}${c.reset} ${c.dim}(${targetPath})${c.reset}`);
+  log(`  ${c.white}⚡ Comando${c.reset}  ${c.cyan}${c.bold}${command}${c.reset}`);
+  if (autoFix) log(`  ${c.white}🔧 Fix${c.reset}     ${c.green}enabled${c.reset}`);
+  if (verbose) log(`  ${c.white}📢 Verbose${c.reset} ${c.green}enabled${c.reset}`);
+  log(`  ${c.gray}${'─'.repeat(48)}${c.reset}`);
   log('');
 
   const env = {
@@ -484,9 +518,26 @@ function runNoDocker() {
     env,
   });
 
-  child.on('close', (code, signal) => process.exit(exitCodeFromChildClose(code, signal)));
+  child.on('close', (code, signal) => {
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    const exitCode = exitCodeFromChildClose(code, signal);
+    log('');
+    log(`  ${c.gray}${'\u2500'.repeat(48)}${c.reset}`);
+    if (exitCode === 0) {
+      log(`  ${badge(c.bgGreen, '\u2713 PASSED')}  ${c.green}${c.bold}Pipeline conclu\u00eddo${c.reset}  ${c.gray}\u23f1 ${elapsed}s${c.reset}`);
+    } else {
+      log(`  ${badge(c.bgRed, '\u2717 FAILED')}  ${c.red}${c.bold}Pipeline falhou${c.reset} ${c.dim}(exit ${exitCode})${c.reset}  ${c.gray}\u23f1 ${elapsed}s${c.reset}`);
+    }
+    log(`  ${c.gray}${'\u2500'.repeat(48)}${c.reset}`);
+    log('');
+    process.exit(exitCode);
+  });
   child.on('error', (err) => {
-    error(`❌ Erro ao executar: ${err.message}`);
+    if (err.code === 'ENOENT') {
+      error(`❌ bash não encontrado. Verifique sua instalação.`);
+    } else {
+      error(`❌ Erro ao executar: ${err.message}`);
+    }
     process.exit(1);
   });
 }
@@ -553,8 +604,14 @@ async function run() {
 
   if (!dockerAvailable()) {
     error('❌ Docker não está disponível.');
-    error('   Instale: https://docs.docker.com/get-docker/');
-    error('   Ou use: alpha-ci --no-docker <command>');
+    if (process.platform === 'darwin') {
+      error('   Instale: brew install --cask docker');
+    } else if (process.platform === 'win32') {
+      error('   Instale: https://docs.docker.com/desktop/install/windows-install/');
+    } else {
+      error('   Instale: https://docs.docker.com/engine/install/');
+    }
+    error(`   Ou use: ${c.cyan}alpha-ci --no-docker ${command}${c.reset}`);
     process.exit(1);
   }
 
@@ -566,9 +623,10 @@ async function run() {
     image = imageExists(IMAGE) ? IMAGE : IMAGE_LOCAL;
     // Tenta atualizar a imagem silenciosamente se for a oficial
     if (image === IMAGE && !rebuild) {
+      const pullTimeout = parseInt(process.env.ALPHA_CI_DOCKER_PULL_TIMEOUT, 10) || 15000;
       try {
         log(`${c.dim}ℹ️  Verificando atualizações da imagem Docker...${c.reset}`);
-        execFileSync('docker', ['pull', IMAGE], { stdio: 'ignore', timeout: 15000 });
+        execFileSync('docker', ['pull', IMAGE], { stdio: 'ignore', timeout: pullTimeout });
       } catch (e) {
         // Ignora erro (offline, timeout ou interrupção) e usa cache
       }
@@ -576,9 +634,16 @@ async function run() {
   }
 
   const repoName = basename(targetPath);
-  info(`🎯 Target: ${repoName} (${targetPath})`);
-  info(`🐳 Image: ${image}`);
-  info(`🚀 Command: ${command}`);
+  log('');
+  log(`  ${c.magenta}${c.bold}🛡️  Alpha CI${c.reset} ${c.gray}v${VERSION}${c.reset}  ${badge(c.bgCyan, 'DOCKER')}`);
+  log(`  ${c.gray}${'─'.repeat(48)}${c.reset}`);
+  log(`  ${c.white}📂 Projeto${c.reset}  ${c.bold}${repoName}${c.reset} ${c.dim}(${targetPath})${c.reset}`);
+  log(`  ${c.white}🐳 Imagem${c.reset}   ${c.dim}${image}${c.reset}`);
+  log(`  ${c.white}⚡ Comando${c.reset}  ${c.cyan}${c.bold}${command}${c.reset}`);
+  if (autoFix) log(`  ${c.white}🔧 Fix${c.reset}     ${c.green}enabled${c.reset}`);
+  if (verbose) log(`  ${c.white}📢 Verbose${c.reset} ${c.green}enabled${c.reset}`);
+  if (reportOutput) log(`  ${c.white}📄 Report${c.reset}  ${c.yellow}${reportFormat}${c.reset} ${c.dim}→${c.reset} ${reportOutput}`);
+  log(`  ${c.gray}${'─'.repeat(48)}${c.reset}`);
   log('');
 
   // Create secure env file (prevents token leakage via ps/docker inspect)
@@ -659,13 +724,29 @@ async function run() {
   child.on('close', (code, signal) => {
     if (forceExitTimer) clearTimeout(forceExitTimer);
     cleanupEnvFile(envFile);
-    process.exit(exitCodeFromChildClose(code, signal));
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    const exitCode = exitCodeFromChildClose(code, signal);
+    log('');
+    log(`  ${c.gray}${'─'.repeat(48)}${c.reset}`);
+    if (exitCode === 0) {
+      log(`  ${badge(c.bgGreen, '✓ PASSED')}  ${c.green}${c.bold}Pipeline concluído${c.reset}  ${c.gray}⏱ ${elapsed}s${c.reset}`);
+    } else {
+      log(`  ${badge(c.bgRed, '✗ FAILED')}  ${c.red}${c.bold}Pipeline falhou${c.reset} ${c.dim}(exit ${exitCode})${c.reset}  ${c.gray}⏱ ${elapsed}s${c.reset}`);
+    }
+    log(`  ${c.gray}${'─'.repeat(48)}${c.reset}`);
+    log('');
+    process.exit(exitCode);
   });
 
   child.on('error', (err) => {
     if (forceExitTimer) clearTimeout(forceExitTimer);
     cleanupEnvFile(envFile);
-    error(`❌ Erro ao executar Docker: ${err.message}`);
+    if (err.code === 'ENOENT') {
+      error('❌ Docker não encontrado no PATH.');
+      error(`   Ou use: ${c.cyan}alpha-ci --no-docker ${command}${c.reset}`);
+    } else {
+      error(`❌ Erro ao executar Docker: ${err.message}`);
+    }
     process.exit(1);
   });
 

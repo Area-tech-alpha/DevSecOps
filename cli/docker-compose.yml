@@ -19,6 +19,7 @@ services:
       - AUTO_FIX=${AUTO_FIX:-false}
       - REPORT_FORMAT=${REPORT_FORMAT:-text}
       - REPORT_OUTPUT=${REPORT_OUTPUT:-}
+      
     # Security hardening
     cap_drop:
       - ALL

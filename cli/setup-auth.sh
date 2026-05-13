@@ -6,10 +6,15 @@
 # ║  Uso:                                                        ║
 # ║  bash <(curl -fsSL https://raw.githubusercontent.com/        ║
 # ║    Area-tech-alpha/DevSecOps/main/cli/setup-auth.sh)         ║
+# ║                                                              ║
+# ║  Flags:                                                      ║
+# ║    --skip-docker    Pula configuração do Docker/GHCR         ║
+# ║    --skip-install   Pula instalação global do alpha-ci       ║
 # ╚══════════════════════════════════════════════════════════════╝
 
 set -euo pipefail
 
+# ── Cores ──
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -19,6 +24,30 @@ BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
 
+# ── Timer ──
+SETUP_START=$(date +%s)
+
+# ── Parse flags ──
+SKIP_DOCKER=false
+SKIP_INSTALL=false
+for arg in "$@"; do
+  case "$arg" in
+    --skip-docker)  SKIP_DOCKER=true ;;
+    --skip-install) SKIP_INSTALL=true ;;
+    --help|-h)
+      echo "Usage: setup-auth.sh [--skip-docker] [--skip-install]"
+      echo ""
+      echo "  --skip-docker    Pula configuração do Docker/GHCR (Step 3)"
+      echo "  --skip-install   Pula instalação global do alpha-ci (Step 4)"
+      exit 0
+      ;;
+  esac
+done
+
+# ── Summary tracking ──
+SUMMARY_ITEMS=()
+summary_add() { SUMMARY_ITEMS+=("$1"); }
+
 echo -e ""
 echo -e "${MAGENTA}${BOLD}  ╔═══════════════════════════════════════════════╗${NC}"
 echo -e "${MAGENTA}${BOLD}  ║     🛡️  Alpha CI — Setup                      ║${NC}"
@@ -27,10 +56,34 @@ echo -e "${MAGENTA}${BOLD}  ╚════════════════�
 echo ""
 
 # ══════════════════════════════════════════════════
+#  PRE-FLIGHT: Verificações rápidas
+# ══════════════════════════════════════════════════
+
+echo -e "  ${DIM}── Pre-flight checks ──${NC}"
+
+# Verificar se npm está instalado
+if ! command -v npm &>/dev/null; then
+  echo -e "  ${RED}❌ npm não encontrado.${NC}"
+  echo -e "     Instale Node.js 18+: https://nodejs.org/"
+  exit 1
+fi
+echo -e "  ${GREEN}✓${NC} npm $(npm -v) disponível"
+
+# Verificar se Node >= 18
+NODE_VERSION=$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+if [ -n "$NODE_VERSION" ] && [ "$NODE_VERSION" -lt 18 ] 2>/dev/null; then
+  echo -e "  ${RED}❌ Node.js v${NODE_VERSION} detectado. Alpha CI requer Node >= 18.${NC}"
+  echo -e "     Atualize: https://nodejs.org/"
+  exit 1
+fi
+echo -e "  ${GREEN}✓${NC} Node.js $(node -v)"
+echo ""
+
+# ══════════════════════════════════════════════════
 #  STEP 1: Coletar credenciais
 # ══════════════════════════════════════════════════
 
-echo -e "  ${CYAN}── Step 1/3: Credenciais ──${NC}"
+echo -e "  ${CYAN}── Step 1/4: Credenciais ──${NC}"
 echo ""
 
 GH_USERNAME=""
@@ -98,12 +151,33 @@ if [ -z "$GH_TOKEN" ]; then
   fi
 fi
 
-# ── Validação Ativa do Token ──
+# ── Validação Ativa do Token (com retry) ──
 echo -e "  ${CYAN}🔍 Validando token contra a API do GitHub...${NC}"
 
-# Silenciosamente tenta pegar info do usuário e escopos
-API_RESPONSE=$(curl -s -I -H "Authorization: token $GH_TOKEN" https://api.github.com/user)
-HTTP_STATUS=$(echo "$API_RESPONSE" | grep "HTTP/" | awk '{print $2}' | head -n 1)
+MAX_RETRIES=3
+RETRY_DELAY=2
+HTTP_STATUS=""
+
+for attempt in $(seq 1 $MAX_RETRIES); do
+  # Silenciosamente tenta pegar info do usuário e escopos
+  API_RESPONSE=$(curl -s -I --max-time 10 -H "Authorization: token $GH_TOKEN" https://api.github.com/user 2>/dev/null || echo "")
+  HTTP_STATUS=$(echo "$API_RESPONSE" | grep "HTTP/" | awk '{print $2}' | head -n 1)
+
+  if [ -n "$HTTP_STATUS" ]; then
+    break
+  fi
+
+  if [ "$attempt" -lt "$MAX_RETRIES" ]; then
+    echo -e "  ${DIM}⏳ Tentativa $attempt/$MAX_RETRIES falhou. Retentando em ${RETRY_DELAY}s...${NC}"
+    sleep $RETRY_DELAY
+  fi
+done
+
+if [ -z "$HTTP_STATUS" ]; then
+  echo -e "  ${RED}❌ Não foi possível conectar à API do GitHub após $MAX_RETRIES tentativas.${NC}"
+  echo -e "     Verifique sua conexão com a internet."
+  exit 1
+fi
 
 if [ "$HTTP_STATUS" != "200" ]; then
   echo -e "  ${RED}❌ Token inválido ou expirado (HTTP $HTTP_STATUS).${NC}"
@@ -114,6 +188,7 @@ fi
 # Extrair escopos do header X-OAuth-Scopes
 SCOPES=$(echo "$API_RESPONSE" | grep -i "x-oauth-scopes:" | cut -d':' -f2 | tr -d ' \r\n')
 echo -e "  ${GREEN}✓${NC} Token válido. Scopes: ${DIM}${SCOPES:-none (fine-grained?)}${NC}"
+summary_add "Token GitHub validado (scopes: ${SCOPES:-fine-grained})"
 
 # Se tiver admin, repo ou write:packages, ele já tem permissão de leitura
 if [[ ! "$SCOPES" =~ "read:packages" ]] && [[ ! "$SCOPES" =~ "write:packages" ]] && [[ ! "$SCOPES" =~ "repo" ]] && [[ ! "$SCOPES" =~ "admin" ]]; then
@@ -126,12 +201,13 @@ fi
 
 # Extrair username automaticamente se ainda não tivermos
 if [ -z "$GH_USERNAME" ]; then
-  GH_USERNAME=$(curl -s -H "Authorization: token $GH_TOKEN" https://api.github.com/user | grep -oP '"login":\s*"\K[^"]+')
+  GH_USERNAME=$(curl -s --max-time 10 -H "Authorization: token $GH_TOKEN" https://api.github.com/user | grep -oP '"login":\s*"\K[^"]+')
   echo -e "  ${GREEN}✓${NC} Usuário detectado: ${BOLD}$GH_USERNAME${NC}"
 fi
+summary_add "Usuário: $GH_USERNAME"
 
 # Verificar se pertence à Area-tech-alpha e se precisa de SSO
-ORG_CHECK=$(curl -s -I -H "Authorization: token $GH_TOKEN" https://api.github.com/orgs/Area-tech-alpha)
+ORG_CHECK=$(curl -s -I --max-time 10 -H "Authorization: token $GH_TOKEN" https://api.github.com/orgs/Area-tech-alpha 2>/dev/null || echo "")
 ORG_STATUS=$(echo "$ORG_CHECK" | grep "HTTP/" | awk '{print $2}' | head -n 1)
 
 if [ "$ORG_STATUS" = "403" ] || [ "$ORG_STATUS" = "404" ]; then
@@ -151,7 +227,7 @@ echo ""
 #  STEP 2: Configurar npm (.npmrc global)
 # ══════════════════════════════════════════════════
 
-echo -e "  ${CYAN}── Step 2/3: Configurando npm ──${NC}"
+echo -e "  ${CYAN}── Step 2/4: Configurando npm ──${NC}"
 echo ""
 
 # Alerta se houver .npmrc local conflitante
@@ -169,6 +245,8 @@ if [ -f "$NPMRC_GLOBAL" ]; then
   sed -i '/area-tech-alpha:registry/d' "$NPMRC_GLOBAL" || true
   sed -i '/npm.pkg.github.com\/:_authToken/d' "$NPMRC_GLOBAL" || true
   sed -i '/npm.pkg.github.com\/always-auth/d' "$NPMRC_GLOBAL" || true
+  # Remove always-auth duplicatas que possam ter se acumulado
+  sed -i '/^always-auth=true$/d' "$NPMRC_GLOBAL" || true
 fi
 
 # Configura via npm config (grava no .npmrc global automaticamente)
@@ -178,12 +256,15 @@ echo -e "  ${CYAN}⚙️  Configurando registry e token...${NC}"
 npm config set @area-tech-alpha:registry https://npm.pkg.github.com
 npm config set "//npm.pkg.github.com/:_authToken" "$GH_TOKEN"
 
-# Injeta always-auth diretamente no arquivo (evita erro no npm v9+)
-echo "always-auth=true" >> "$NPMRC_GLOBAL"
+# Injeta always-auth apenas se não existir (evita duplicatas em execuções repetidas)
+if ! grep -q '^always-auth=true$' "$NPMRC_GLOBAL" 2>/dev/null; then
+  echo "always-auth=true" >> "$NPMRC_GLOBAL"
+fi
 
 echo -e "  ${GREEN}✓${NC} Registry @area-tech-alpha configurado"
 echo -e "  ${GREEN}✓${NC} Auth token injetado e higienizado"
 echo -e "  ${GREEN}✓${NC} always-auth = true (enforced)"
+summary_add "npm registry @area-tech-alpha configurado"
 
 # Valida acesso
 echo ""
@@ -195,6 +276,7 @@ set -e
 
 if [ $VIEW_EXIT -eq 0 ]; then
   echo -e "  ${GREEN}✓${NC} Acesso validado! Versão disponível: ${BOLD}$VIEW_RESULT${NC}"
+  summary_add "Acesso ao GitHub Packages validado (v$VIEW_RESULT)"
 else
   echo -e "  ${YELLOW}⚠${NC} Não foi possível validar o acesso. Verifique o token."
   echo -e "    ${DIM}Se o erro for 403 (Forbidden), você DEVE autorizar o token para SSO:${NC}"
@@ -209,10 +291,13 @@ echo ""
 #  STEP 3: Configurar Docker (GHCR)
 # ══════════════════════════════════════════════════
 
-echo -e "  ${CYAN}── Step 3/3: Configurando Docker (GHCR) ──${NC}"
+echo -e "  ${CYAN}── Step 3/4: Configurando Docker (GHCR) ──${NC}"
 echo ""
 
-if command -v docker &>/dev/null; then
+if [ "$SKIP_DOCKER" = "true" ]; then
+  echo -e "  ${DIM}⏩ Pulando configuração Docker (--skip-docker)${NC}"
+  summary_add "Docker: pulado (--skip-docker)"
+elif command -v docker &>/dev/null; then
   echo -e "  ${GREEN}✓${NC} Docker detectado"
 
   # Login no GHCR usando o token que já temos
@@ -224,6 +309,7 @@ if command -v docker &>/dev/null; then
 
   if [ $DOCKER_EXIT -eq 0 ]; then
     echo -e "  ${GREEN}✓${NC} Docker autenticado no ghcr.io como ${BOLD}$GH_USERNAME${NC}"
+    summary_add "Docker autenticado no ghcr.io"
 
     # Tenta puxar a imagem para validar
     echo -e "  ${CYAN}📦 Puxando imagem alpha-ci...${NC}"
@@ -234,6 +320,7 @@ if command -v docker &>/dev/null; then
 
     if [ $PULL_EXIT -eq 0 ]; then
       echo -e "  ${GREEN}✓${NC} Imagem alpha-ci:latest baixada com sucesso"
+      summary_add "Imagem Docker alpha-ci:latest baixada"
     else
       echo -e "  ${YELLOW}⚠${NC} Não foi possível puxar a imagem. Será baixada na primeira execução."
     fi
@@ -243,11 +330,10 @@ if command -v docker &>/dev/null; then
 else
   echo -e "  ${YELLOW}⚠${NC} Docker não encontrado. Instale em: https://docs.docker.com/get-docker/"
   echo -e "    ${DIM}Você ainda pode usar: alpha-ci lint --no-docker${NC}"
+  summary_add "Docker: não encontrado (use --no-docker)"
 fi
 
-# ══════════════════════════════════════════════════
-#  DONE
-# ══════════════════════════════════════════════════
+echo ""
 
 # ══════════════════════════════════════════════════
 #  STEP 4: Instalação Global
@@ -256,23 +342,41 @@ fi
 echo -e "  ${CYAN}── Step 4/4: Instalando Alpha CI globalmente ──${NC}"
 echo ""
 
-if npm install -g @area-tech-alpha/alpha-ci; then
-  echo -e "  ${GREEN}✓${NC} Alpha CI instalado com sucesso!"
+if [ "$SKIP_INSTALL" = "true" ]; then
+  echo -e "  ${DIM}⏩ Pulando instalação global (--skip-install)${NC}"
+  summary_add "Instalação global: pulada (--skip-install)"
+elif npm install -g @area-tech-alpha/alpha-ci 2>&1 | tail -1; then
+  # Usa npm list ao invés de alpha-ci --version para não disparar o Docker container
+  INSTALLED_VERSION=$(npm list -g @area-tech-alpha/alpha-ci --depth=0 2>/dev/null | grep -oP '@\K[0-9]+\.[0-9]+\.[0-9]+' || echo "?")
+  echo -e "  ${GREEN}✓${NC} Alpha CI instalado com sucesso! ${BOLD}v${INSTALLED_VERSION}${NC}"
+  summary_add "Alpha CI instalado globalmente (v${INSTALLED_VERSION})"
 else
-  echo -e "  ${YELLOW}⚠${NC} Falha na instalação global. Tente rodar manually:${NC}"
+  echo -e "  ${YELLOW}⚠${NC} Falha na instalação global. Tente rodar manualmente:${NC}"
   echo -e "    ${CYAN}sudo npm install -g @area-tech-alpha/alpha-ci${NC}"
+  summary_add "Instalação global: falhou (tente com sudo)"
 fi
 
 echo ""
 
 # ══════════════════════════════════════════════════
-#  DONE
+#  DONE: Resumo final
 # ══════════════════════════════════════════════════
+
+SETUP_END=$(date +%s)
+SETUP_DURATION=$((SETUP_END - SETUP_START))
 
 echo -e "  ${GREEN}══════════════════════════════════════════════${NC}"
 echo -e "  ${GREEN}✅ Setup concluído com sucesso!${NC}"
 echo -e "  ${GREEN}══════════════════════════════════════════════${NC}"
 echo ""
+echo -e "  ${BOLD}📋 Resumo:${NC}"
+for item in "${SUMMARY_ITEMS[@]}"; do
+  echo -e "    ${GREEN}✓${NC} $item"
+done
+echo -e "    ${DIM}⏱  Tempo total: ${SETUP_DURATION}s${NC}"
+echo ""
 echo -e "  ${BOLD}Agora você pode usar em qualquer projeto:${NC}"
-echo -e "    ${CYAN}alpha-ci all${NC}"
+echo -e "    ${CYAN}alpha-ci all${NC}        ${DIM}# Pipeline completo${NC}"
+echo -e "    ${CYAN}alpha-ci security${NC}   ${DIM}# Scan de segurança${NC}"
+echo -e "    ${CYAN}alpha-ci lint --fix${NC} ${DIM}# Lint com auto-fix${NC}"
 echo ""
