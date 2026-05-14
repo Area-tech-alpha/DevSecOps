@@ -149,9 +149,9 @@ jobs:
 
           echo "🛡️ Rodando Semgrep..."
           if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
-            semgrep scan --config="p/security-audit" --config="p/react" --quiet &
+            semgrep scan --config="p/security-audit" --config="p/react" --config="devsecops/security/semgrep.yml" --quiet &
           else
-            semgrep scan --config="p/security-audit" --quiet &
+            semgrep scan --config="p/security-audit" --config="devsecops/security/semgrep.yml" --quiet &
           fi
           PID_SEM=$!
 

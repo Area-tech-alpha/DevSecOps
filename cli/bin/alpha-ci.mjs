@@ -275,7 +275,7 @@ function validateTargetPath(p) {
 targetPath = validateTargetPath(targetPath);
 
 // ── Persistence: Auto-install pre-push hook on first run in a project ──
-(function installHookOnHost() {
+/* (function installHookOnHost() {
   try {
     const auto = process.env.ALPHA_CI_AUTO_INSTALL_HOOK;
     if (auto === 'false' || auto === '0') return;
@@ -320,7 +320,7 @@ targetPath = validateTargetPath(targetPath);
   } catch (e) {
     // Silent fail unless verbose (validation path might be sensitive)
   }
-})();
+})(); */
 
 // ── Security: Validate report output path ──
 function validateOutputPath(output, target) {

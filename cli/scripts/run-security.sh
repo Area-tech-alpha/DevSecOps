@@ -112,6 +112,10 @@ if [ "$SKIP_SEMGREP" = "false" ]; then
     SEMGREP_ARGS+=("--config=p/react")
   fi
 
+  if [ -n "$CONFIG_SEC" ] && [ -f "$CONFIG_SEC/semgrep.yml" ]; then
+    SEMGREP_ARGS+=("--config=$CONFIG_SEC/semgrep.yml")
+  fi
+
   # Report output
   if [ "${REPORT_FORMAT:-text}" != "text" ]; then
     SEMGREP_ARGS+=("--json" "--output" "/tmp/semgrep-report.json")

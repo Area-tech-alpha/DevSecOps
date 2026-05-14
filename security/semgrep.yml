@@ -1,0 +1,8 @@
+rules:
+  - id: hardcoded-uuid
+    patterns:
+      - pattern-regex: "(?i)\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b"
+      - pattern-not-regex: "(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    message: "Hardcoded UUID detectado no código. Evite usar UUIDs fixos diretamente (podem ser credenciais, identificadores vázados ou causar problemas nos ambientes)."
+    languages: [generic]
+    severity: WARNING
