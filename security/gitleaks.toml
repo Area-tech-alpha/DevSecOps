@@ -18,3 +18,4 @@ paths = [
 # Você também pode adicionar stop-words ou regexes específicas aqui se necessário.
 # [allowlist]
 # stopwords = ["example-key", "dummy-token"]
+
