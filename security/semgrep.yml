@@ -6,3 +6,11 @@ rules:
     message: "Hardcoded UUID detectado no código. Evite usar UUIDs fixos diretamente (podem ser credenciais, identificadores vázados ou causar problemas nos ambientes)."
     languages: [generic]
     severity: WARNING
+
+  - id: hardcoded-api-key
+    patterns:
+      - pattern-regex: "(?i)(api_?key|secret|token|pass(word)?)\\s*[:=]\\s*['\"][A-Za-z0-9_\\-+=!@#$%^&*]{8,}['\"]"
+      - pattern-not-regex: "(?i)process\\.env\\."
+    message: "🚨 BLOCKED: Chave de API, Token ou Password hardcoded detectado. Nunca commite credenciais no código-fonte! Use variáveis de ambiente."
+    languages: [generic]
+    severity: ERROR
