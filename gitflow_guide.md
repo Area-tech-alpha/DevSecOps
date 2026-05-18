@@ -91,17 +91,12 @@ git flow feature start nova-tela
 git flow feature finish nova-tela
 ```
 
-### 2. Lançando uma versão (Release)
-Quando sua `develop` estiver pronta para uma nova versão, crie a release para homologar, testar e alterar arquivos de controle (ex: mudar versão do `package.json`).
+### 2. Github
+Depois de finalizar suas features basta fazer o push para o github e abrir uma PR para a Main
 ```bash
-# Cria a branch 'release/1.1.0' a partir da develop
-git flow release start 1.1.0
+ #Subir as alterações para o github
+git push
 
-# ... Mude a versão, faça testes, commite os ajustes finais ...
-
-# Finaliza a release:
-# Faz merge na main E na develop, cria uma Tag v1.1.0 para o git e apaga a branch 'release'
-git flow release finish 1.1.0
 ```
 
 ### 3. Corrigindo erro crítico em produção (Hotfix)
