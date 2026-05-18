@@ -33,7 +33,7 @@ on:
       - main
 
     paths:
-     - "src/**"
+      - "src/**"
       - "app/**"
       - "lib/**"
       - "prisma/**"
