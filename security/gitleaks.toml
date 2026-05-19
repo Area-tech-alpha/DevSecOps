@@ -20,8 +20,20 @@ tags = ["key", "API", "generic"]
 [[rules]]
 id = "generic-password-assignment"
 description = "Detects hardcoded passwords in variable assignments"
-regex = '''(?i)(password|passwd|pwd|senha)\s*[:=]\s*['"][^'"]{8,}['"]'''
+# \b evita falso positivo em chaves compostas (ex.: atualizacao_senha, alteracao_senha).
+regex = '''(?i)\b(password|passwd|pwd|senha)\b\s*[:=]\s*['"][^'"]{8,}['"]'''
 tags = ["password", "generic"]
+
+[[rules.allowlists]]
+description = "Labels de auditoria/UI em PT-BR (não são credenciais)"
+regexTarget = "line"
+regexes = [
+    # Valores como "Atualização de Senha de Usuário", "Alteração de Senha"
+    '''(?i)['"][^'"]*(?:atualiza[çc][ãa]o|altera[çc][ãa]o|mudan[çc]a|redefini[çc][ãa]o|troca|reset)\s+de\s+senha[^'"]*['"]''',
+    '''(?i)['"][^'"]*\bsenha\s+de\s+usu[aá]rio[^'"]*['"]''',
+    # Chaves compostas *_senha com valor descritivo (espaços = label, não secret)
+    '''(?i)\b\w*senha\w*\s*[:=]\s*['"][^'"]*\s[^'"]{4,}['"]''',
+]
 
 [[rules]]
 id = "generic-secret-const"
