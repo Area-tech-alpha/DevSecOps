@@ -155,17 +155,16 @@ jobs:
             PID_OSV=$!
           fi
 
-          # ── Semgrep (with JSON output for validation + SARIF for upload) ──
+          # ── Semgrep (JSON output for programmatic gate validation) ──
           echo "🛡️ Rodando Semgrep..."
           SEMGREP_CONFIGS="--config=p/security-audit --config=devsecops/security/semgrep.yml"
           if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
             SEMGREP_CONFIGS="$SEMGREP_CONFIGS --config=p/react"
           fi
 
-          # Run Semgrep with JSON output for programmatic validation
+          # Primary scan: JSON output for gate validation
           semgrep scan $SEMGREP_CONFIGS \
             --json --output semgrep-results.json \
-            --sarif --sarif-output semgrep-results.sarif \
             --error \
             --severity ERROR &
           PID_SEM=$!
@@ -426,9 +425,21 @@ jobs:
 # 📤 SARIF Upload — GitHub Security Tab
 # =====================================================
 
+      - name: Generate Semgrep SARIF
+        if: always()
+        run: |
+          SEMGREP_CONFIGS="--config=p/security-audit --config=devsecops/security/semgrep.yml"
+          if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
+            SEMGREP_CONFIGS="$SEMGREP_CONFIGS --config=p/react"
+          fi
+          semgrep scan $SEMGREP_CONFIGS \
+            --sarif --output semgrep-results.sarif \
+            --severity ERROR 2>/dev/null || true
+        continue-on-error: true
+
       - name: Upload Semgrep SARIF
         if: always() && hashFiles('semgrep-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: semgrep-results.sarif
           category: semgrep
@@ -436,7 +447,7 @@ jobs:
 
       - name: Upload Gitleaks SARIF
         if: always() && hashFiles('gitleaks-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: gitleaks-results.sarif
           category: gitleaks
