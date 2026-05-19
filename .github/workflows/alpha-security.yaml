@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  security-events: write
   packages: read
 
 jobs:
@@ -122,9 +121,7 @@ jobs:
           echo "🔐 Rodando Gitleaks..."
           gitleaks detect --source="." \
             --config="devsecops/security/gitleaks.toml" \
-            --redact -v \
-            --report-format sarif \
-            --report-path gitleaks-results.sarif &
+            --redact -v &
           PID_GIT=$!
 
           # ── OSV Scanner ──
@@ -421,37 +418,6 @@ jobs:
           echo "🟢 SECURITY GATE: PASSED"
           echo "══════════════════════════════════════════"
 
-# =====================================================
-# 📤 SARIF Upload — GitHub Security Tab
-# =====================================================
-
-      - name: Generate Semgrep SARIF
-        if: always()
-        run: |
-          SEMGREP_CONFIGS="--config=p/security-audit --config=devsecops/security/semgrep.yml"
-          if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
-            SEMGREP_CONFIGS="$SEMGREP_CONFIGS --config=p/react"
-          fi
-          semgrep scan $SEMGREP_CONFIGS \
-            --sarif --output semgrep-results.sarif \
-            --severity ERROR 2>/dev/null || true
-        continue-on-error: true
-
-      - name: Upload Semgrep SARIF
-        if: always() && hashFiles('semgrep-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: semgrep-results.sarif
-          category: semgrep
-        continue-on-error: true
-
-      - name: Upload Gitleaks SARIF
-        if: always() && hashFiles('gitleaks-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: gitleaks-results.sarif
-          category: gitleaks
-        continue-on-error: true
 
 # =====================================================
 # 📊 Summary
