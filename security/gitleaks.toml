@@ -3,19 +3,74 @@
 # Este arquivo centraliza as regras e exceções do Gitleaks para a organização.
 # Ele permite que arquivos de exemplo (como .env.example) não bloqueiem o build.
 
+title = "Alpha DevSecOps — Gitleaks Config"
+
+# ══════════════════════════════════════════
+# 🔐 Custom Rules — Generic Secret Detection
+# ══════════════════════════════════════════
+# Gitleaks default rules detect known providers (AWS, GCP, GitHub, etc).
+# These custom rules catch proprietary/generic secrets that defaults miss.
+
+[[rules]]
+id = "generic-api-key-assignment"
+description = "Detects hardcoded API keys, tokens, and secrets in variable assignments"
+regex = '''(?i)(api[_-]?key|secret[_-]?key|auth[_-]?token|access[_-]?token)\s*[:=]\s*['"][A-Za-z0-9_\-+=!@#$%^&*]{16,}['"]'''
+tags = ["key", "API", "generic"]
+
+[[rules]]
+id = "generic-password-assignment"
+description = "Detects hardcoded passwords in variable assignments"
+regex = '''(?i)(password|passwd|pwd|senha)\s*[:=]\s*['"][^'"]{8,}['"]'''
+tags = ["password", "generic"]
+
+[[rules]]
+id = "generic-secret-const"
+description = "Detects const/let/var declarations with secret-looking values"
+regex = '''(?i)(const|let|var)\s+(api[_-]?key|secret|token|password|auth[_-]?key|lovable[_-]?api[_-]?key)\s*=\s*['"][A-Za-z0-9_\-+=!@#$%^&*]{12,}['"]'''
+tags = ["key", "secret", "const"]
+
+[[rules]]
+id = "generic-high-entropy-secret"
+description = "High entropy string in sensitive-looking variable"
+regex = '''(?i)(key|token|secret|credential|password)\s*[:=]\s*['"][A-Za-z0-9+/=]{24,}['"]'''
+entropy = 3.5
+secretGroup = 0
+tags = ["entropy", "generic"]
+
+[[rules]]
+id = "connection-string-with-credentials"
+description = "Database connection string with embedded credentials"
+regex = '''(?i)(postgres|mysql|mongodb|redis|amqp)://[^:\s]+:[^@\s]+@[^\s'"]+'''
+tags = ["database", "connection-string"]
+
+# ══════════════════════════════════════════
+# ✅ Allowlist — False Positive Suppression
+# ══════════════════════════════════════════
+
 [allowlist]
 description = "Permite arquivos de exemplo e documentação que contenham chaves 'falsas' ou legadas"
 paths = [
     # Ignora arquivos .env de exemplo
     '''(?i)\.env\.example$''',
+    '''(?i)\.env\.sample$''',
     # Ignora arquivos de teste/mock
-    '''(?i)tests/.*mocks/.*''',
+    '''(?i)tests?/.*mocks?/.*''',
+    '''(?i)__tests__/.*''',
+    '''(?i)fixtures/.*''',
     # Ignora documentação (README/docs) onde chaves de exemplo são comuns
     '''(?i)README\.md$''',
-    '''(?i)docs/.*\.md$'''
+    '''(?i)docs/.*\.md$''',
+    # Ignora lockfiles (não são código)
+    '''(?i)pnpm-lock\.yaml$''',
+    '''(?i)package-lock\.json$''',
+    '''(?i)yarn\.lock$'''
 ]
-
-# Você também pode adicionar stop-words ou regexes específicas aqui se necessário.
-# [allowlist]
-# stopwords = ["example-key", "dummy-token"]
-
+stopwords = [
+    "example-key",
+    "dummy-token",
+    "changeme",
+    "your-api-key",
+    "placeholder",
+    "REPLACE_ME",
+    "xxxx"
+]

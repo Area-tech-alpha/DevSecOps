@@ -114,13 +114,20 @@ jobs:
 # =====================================================
 
       - name: Run Security Scanners
+        id: scanners
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
         run: |
+          # ── Gitleaks ──
           echo "🔐 Rodando Gitleaks..."
-          gitleaks detect --source="." --config="devsecops/security/gitleaks.toml" --redact -v &
+          gitleaks detect --source="." \
+            --config="devsecops/security/gitleaks.toml" \
+            --redact -v \
+            --report-format sarif \
+            --report-path gitleaks-results.sarif &
           PID_GIT=$!
 
+          # ── OSV Scanner ──
           echo "🔍 Detectando lockfiles para OSV..."
           LOCKFILES=$(find . -type d \( -name 'node_modules' -o -name 'venv' -o -name '.venv' -o -name '.git' \) -prune -o -type f \( -name "package-lock.json" \
                                 -o -name "yarn.lock" \
@@ -142,19 +149,28 @@ jobs:
             done
 
             osv-scanner scan \
+              --config=devsecops/security/osv-scanner.toml \
               --format json \
               $CMD_ARGS > osv-results.json 2>osv-errors.log &
             PID_OSV=$!
           fi
 
+          # ── Semgrep (with JSON output for validation + SARIF for upload) ──
           echo "🛡️ Rodando Semgrep..."
+          SEMGREP_CONFIGS="--config=p/security-audit --config=devsecops/security/semgrep.yml"
           if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
-            semgrep scan --config="p/security-audit" --config="p/react" --config="devsecops/security/semgrep.yml" --quiet &
-          else
-            semgrep scan --config="p/security-audit" --config="devsecops/security/semgrep.yml" --quiet &
+            SEMGREP_CONFIGS="$SEMGREP_CONFIGS --config=p/react"
           fi
+
+          # Run Semgrep with JSON output for programmatic validation
+          semgrep scan $SEMGREP_CONFIGS \
+            --json --output semgrep-results.json \
+            --sarif --sarif-output semgrep-results.sarif \
+            --error \
+            --severity ERROR &
           PID_SEM=$!
 
+          # ── Wait for all processes ──
           set +e
           wait $PID_GIT; EXIT_GIT=$?
 
@@ -171,18 +187,39 @@ jobs:
           echo "EXIT_OSV=$EXIT_OSV"
           echo "EXIT_SEM=$EXIT_SEM"
 
+          # ── Save exit codes for downstream steps ──
+          echo "exit_git=$EXIT_GIT" >> $GITHUB_OUTPUT
+          echo "exit_osv=$EXIT_OSV" >> $GITHUB_OUTPUT
+          echo "exit_sem=$EXIT_SEM" >> $GITHUB_OUTPUT
+          echo "skip_osv=${SKIP_OSV:-false}" >> $GITHUB_OUTPUT
+
+          # ── Evaluate Gitleaks ──
           if [ $EXIT_GIT -ne 0 ]; then
-            echo "❌ Segredos detectados"
-            exit 1
+            echo "❌ Gitleaks: Segredos detectados no repositório!"
+            echo "gitleaks_failed=true" >> $GITHUB_OUTPUT
           fi
 
-          if [ $EXIT_SEM -ne 0 ]; then
-            echo "❌ Vulnerabilidades Semgrep"
-            exit 1
+          # ── Evaluate Semgrep via JSON (defense in depth — don't trust exit code alone) ──
+          SEMGREP_FAILED=false
+          if [ -f semgrep-results.json ]; then
+            BLOCKING_COUNT=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' semgrep-results.json 2>/dev/null || echo 0)
+            echo "🔍 Semgrep ERROR-severity findings: $BLOCKING_COUNT"
+
+            if [ "$BLOCKING_COUNT" -gt 0 ]; then
+              echo ""
+              echo "❌ ══ SEMGREP BLOCKING FINDINGS ══"
+              jq -r '.results[] | select(.extra.severity == "ERROR") | "  🚨 \(.check_id)\n     📄 \(.path):\(.start.line)\n     💬 \(.extra.message)\n"' semgrep-results.json
+              SEMGREP_FAILED=true
+            fi
           fi
 
+          if [ $EXIT_SEM -ne 0 ] || [ "$SEMGREP_FAILED" = "true" ]; then
+            echo "semgrep_failed=true" >> $GITHUB_OUTPUT
+          fi
+
+          # ── Evaluate OSV (delegate to Security Gate for layer analysis) ──
           if [ "$SKIP_OSV" != "true" ] && [ $EXIT_OSV -ne 0 ]; then
-            echo "⚠️ OSV Scanner detectou vulnerabilidades ou avisos (Exit: $EXIT_OSV). Delegando a decisão para o Security Gate..."
+            echo "⚠️ OSV Scanner detectou vulnerabilidades (Exit: $EXIT_OSV). Delegando para o Security Gate..."
             cat osv-errors.log || true
           fi
 
@@ -217,120 +254,193 @@ jobs:
 # =====================================================
 
       - name: Enforce Security Gate
+        id: gate
         run: |
+          GATE_FAILED=false
+
+          # ════════════════════════════════════════
+          # Layer 0: Gitleaks (secrets in code)
+          # ════════════════════════════════════════
+          if [ "${{ steps.scanners.outputs.gitleaks_failed }}" == "true" ]; then
+            echo ""
+            echo "❌ ══ GITLEAKS: SEGREDOS DETECTADOS ══"
+            echo "O scan detectou credenciais ou segredos no código-fonte."
+            echo "Remova todas as credenciais e use variáveis de ambiente."
+            GATE_FAILED=true
+          else
+            echo "✅ Gitleaks: Nenhum segredo detectado"
+          fi
+
+          # ════════════════════════════════════════
+          # Layer 0: Semgrep (SAST findings)
+          # ════════════════════════════════════════
+          if [ "${{ steps.scanners.outputs.semgrep_failed }}" == "true" ]; then
+            echo ""
+            echo "❌ ══ SEMGREP: VULNERABILIDADES BLOCKING ══"
+            if [ -f semgrep-results.json ]; then
+              BLOCKING=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' semgrep-results.json 2>/dev/null || echo "?")
+              echo "Total de findings ERROR-severity: $BLOCKING"
+              echo ""
+              jq -r '.results[] | select(.extra.severity == "ERROR") | "  🚨 [\(.check_id)] \(.path):\(.start.line)\n     \(.extra.message)\n"' semgrep-results.json
+            fi
+            GATE_FAILED=true
+          else
+            echo "✅ Semgrep: Nenhuma vulnerabilidade blocking"
+          fi
+
+          # ════════════════════════════════════════
+          # Layer 1+2: OSV (dependency vulnerabilities)
+          # ════════════════════════════════════════
           if [ ! -f osv-results.json ]; then
             echo "ℹ️ OSV não executado — pulando gate"
-            exit 0
-          fi
-
-          # ── Extrair dependências diretas do package.json ──
-          if [ -f package.json ]; then
-            jq -r '[
-              (.dependencies // {} | keys[]),
-              (.devDependencies // {} | keys[])
-            ] | unique | .[]' package.json > direct-deps-raw.txt
-
-            DIRECT_COUNT=$(wc -l < direct-deps-raw.txt | tr -d ' ')
-            echo "📦 Dependências diretas encontradas: $DIRECT_COUNT"
-
-            # Converter lista para JSON array para uso no jq
-            jq -R -s 'split("\n") | map(select(length > 0))' direct-deps-raw.txt > direct-deps.json
           else
-            # Sem package.json (Go, Python, etc) → trata TUDO como direta (modo seguro)
-            echo "⚠️ Sem package.json — todas as deps serão tratadas como diretas"
-            echo '[]' > direct-deps.json
-          fi
+            # ── Extrair dependências diretas do package.json ──
+            if [ -f package.json ]; then
+              jq -r '[
+                (.dependencies // {} | keys[]),
+                (.devDependencies // {} | keys[])
+              ] | unique | .[]' package.json > direct-deps-raw.txt
 
-          # ── Helper: filtro jq para HIGH/CRITICAL ──
-          SEVERITY_FILTER='(
-            (.vuln.database_specific.cvssScore // 0) >= 7
-            or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
-            or ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
-          )'
+              DIRECT_COUNT=$(wc -l < direct-deps-raw.txt | tr -d ' ')
+              echo "📦 Dependências diretas encontradas: $DIRECT_COUNT"
 
-          # Verifica se direct-deps.json está vazio (modo sem package.json)
-          DIRECT_LIST_EMPTY=$(jq 'length == 0' direct-deps.json)
+              # Converter lista para JSON array para uso no jq
+              jq -R -s 'split("\n") | map(select(length > 0))' direct-deps-raw.txt > direct-deps.json
+            else
+              # Sem package.json (Go, Python, etc) → trata TUDO como direta (modo seguro)
+              echo "⚠️ Sem package.json — todas as deps serão tratadas como diretas"
+              echo '[]' > direct-deps.json
+            fi
 
-          # ── Layer 1: Contar vulns em dependências DIRETAS ──
-          DIRECT_VULNS=$(jq --slurpfile direct direct-deps.json "
-            [
-              .results[]?
-              | (.packages[]? | . as \$pkg | .vulnerabilities[]? | {vuln: ., name: \$pkg.package.name, ver: \$pkg.package.version})
-              | select(
-                  ( (\$direct[0] | length) == 0 or (.name as \$n | \$direct[0] | index(\$n) != null) )
-                  and ${SEVERITY_FILTER}
-                )
-            ] | length
-          " osv-results.json)
+            # ── Helper: filtro jq para HIGH/CRITICAL ──
+            SEVERITY_FILTER='(
+              (.vuln.database_specific.cvssScore // 0) >= 7
+              or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
+              or ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
+            )'
 
-          # ── Layer 2: Contar vulns em dependências TRANSITIVAS ──
-          TRANSITIVE_VULNS=0
-          if [ "$DIRECT_LIST_EMPTY" == "false" ]; then
-            TRANSITIVE_VULNS=$(jq --slurpfile direct direct-deps.json "
+            # Verifica se direct-deps.json está vazio (modo sem package.json)
+            DIRECT_LIST_EMPTY=$(jq 'length == 0' direct-deps.json)
+
+            # ── Layer 1: Contar vulns em dependências DIRETAS ──
+            DIRECT_VULNS=$(jq --slurpfile direct direct-deps.json "
               [
                 .results[]?
                 | (.packages[]? | . as \$pkg | .vulnerabilities[]? | {vuln: ., name: \$pkg.package.name, ver: \$pkg.package.version})
                 | select(
-                    (.name as \$n | \$direct[0] | index(\$n) == null)
+                    ( (\$direct[0] | length) == 0 or (.name as \$n | \$direct[0] | index(\$n) != null) )
                     and ${SEVERITY_FILTER}
                   )
               ] | length
             " osv-results.json)
+
+            # ── Layer 2: Contar vulns em dependências TRANSITIVAS ──
+            TRANSITIVE_VULNS=0
+            if [ "$DIRECT_LIST_EMPTY" == "false" ]; then
+              TRANSITIVE_VULNS=$(jq --slurpfile direct direct-deps.json "
+                [
+                  .results[]?
+                  | (.packages[]? | . as \$pkg | .vulnerabilities[]? | {vuln: ., name: \$pkg.package.name, ver: \$pkg.package.version})
+                  | select(
+                      (.name as \$n | \$direct[0] | index(\$n) == null)
+                      and ${SEVERITY_FILTER}
+                    )
+                ] | length
+              " osv-results.json)
+            fi
+
+            echo ""
+            echo "════════════════════════════════════════════════"
+            echo "🔢 DIRETAS    HIGH/CRITICAL: $DIRECT_VULNS"
+            echo "🔢 TRANSITIVAS HIGH/CRITICAL: $TRANSITIVE_VULNS"
+            echo "════════════════════════════════════════════════"
+
+            # ── Layer 2: WARNING — Transitivas (não bloqueiam) ──
+            if (( TRANSITIVE_VULNS > 0 )); then
+              echo ""
+              echo "⚠️  ══ TRANSITIVAS COM VULNERABILIDADES (WARNING — não bloqueia) ══"
+              jq -r --slurpfile direct direct-deps.json '
+                .results[]?
+                | (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version})
+                | select(
+                    (.name as $n | $direct[0] | index($n) == null)
+                    and (
+                      (.vuln.database_specific.cvssScore // 0) >= 7
+                      or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
+                      or ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
+                    )
+                  )
+                | ([ .vuln.affected[]? | .ranges[]?.events[]?.fixed | select(type=="string") ] | .[0]) as $fixed
+                | "  ⚠️  \(.vuln.id // "N/A") → \(.name)@\(.ver)\n     \(.vuln.summary // "Sem descrição")\n     Fix: \(if $fixed != null then "v\($fixed)+" else "Desconhecido" end)\n"
+              ' osv-results.json
+              echo ""
+              echo "ℹ️  Transitivas não bloqueiam o pipeline. Corrija via overrides no package.json."
+              echo "   Consulte: https://docs.npmjs.com/cli/v10/configuring-npm/package-json#overrides"
+            fi
+
+            # ── Layer 1: BLOCK — Diretas (bloqueiam o pipeline) ──
+            if (( DIRECT_VULNS > 0 )); then
+              echo ""
+              echo "❌ ══ DIRETAS COM VULNERABILIDADES (BLOCKING) ══"
+              jq -r --slurpfile direct direct-deps.json '
+                .results[]?
+                | (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version})
+                | select(
+                    ( ($direct[0] | length) == 0 or (.name as $n | $direct[0] | index($n) != null) )
+                    and (
+                      (.vuln.database_specific.cvssScore // 0) >= 7
+                      or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
+                      or ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
+                    )
+                  )
+                | ([ .vuln.affected[]? | .ranges[]?.events[]?.fixed | select(type=="string") ] | .[0]) as $fixed
+                | "• \(.vuln.id // "N/A") 🎯 Alvo: \(.name // "Desconhecido")@\(.ver // "?")\n  🚨 Ameaça: \(.vuln.summary // "Exploit Desconhecido")\n  💉 Fix: \(if $fixed != null then "Migre urgente para v\($fixed)+ (Rode: `npm install \(.name)@^\($fixed)` ou `pnpm update \(.name)@>=\($fixed)`)" else "Patch fix exato desconhecido. Forçe um update do pacote \(.name)." end)\n"
+              ' osv-results.json
+
+              GATE_FAILED=true
+            fi
+
+            if (( DIRECT_VULNS == 0 )); then
+              echo ""
+              echo "✅ Nenhuma vulnerabilidade crítica em dependências diretas"
+            fi
           fi
 
+          # ════════════════════════════════════════
+          # 🚨 FINAL GATE DECISION
+          # ════════════════════════════════════════
           echo ""
-          echo "════════════════════════════════════════════════"
-          echo "🔢 DIRETAS    HIGH/CRITICAL: $DIRECT_VULNS"
-          echo "🔢 TRANSITIVAS HIGH/CRITICAL: $TRANSITIVE_VULNS"
-          echo "════════════════════════════════════════════════"
-
-          # ── Layer 2: WARNING — Transitivas (não bloqueiam) ──
-          if (( TRANSITIVE_VULNS > 0 )); then
-            echo ""
-            echo "⚠️  ══ TRANSITIVAS COM VULNERABILIDADES (WARNING — não bloqueia) ══"
-            jq -r --slurpfile direct direct-deps.json '
-              .results[]?
-              | (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version})
-              | select(
-                  (.name as $n | $direct[0] | index($n) == null)
-                  and (
-                    (.vuln.database_specific.cvssScore // 0) >= 7
-                    or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
-                    or ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
-                  )
-                )
-              | ([ .vuln.affected[]? | .ranges[]?.events[]?.fixed | select(type=="string") ] | .[0]) as $fixed
-              | "  ⚠️  \(.vuln.id // "N/A") → \(.name)@\(.ver)\n     \(.vuln.summary // "Sem descrição")\n     Fix: \(if $fixed != null then "v\($fixed)+" else "Desconhecido" end)\n"
-            ' osv-results.json
-            echo ""
-            echo "ℹ️  Transitivas não bloqueiam o pipeline. Corrija via overrides no package.json."
-            echo "   Consulte: https://docs.npmjs.com/cli/v10/configuring-npm/package-json#overrides"
-          fi
-
-          # ── Layer 1: BLOCK — Diretas (bloqueiam o pipeline) ──
-          if (( DIRECT_VULNS > 0 )); then
-            echo ""
-            echo "❌ ══ DIRETAS COM VULNERABILIDADES (BLOCKING) ══"
-            jq -r --slurpfile direct direct-deps.json '
-              .results[]?
-              | (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version})
-              | select(
-                  ( ($direct[0] | length) == 0 or (.name as $n | $direct[0] | index($n) != null) )
-                  and (
-                    (.vuln.database_specific.cvssScore // 0) >= 7
-                    or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
-                    or ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
-                  )
-                )
-              | ([ .vuln.affected[]? | .ranges[]?.events[]?.fixed | select(type=="string") ] | .[0]) as $fixed
-              | "• \(.vuln.id // "N/A") 🎯 Alvo: \(.name // "Desconhecido")@\(.ver // "?")\n  🚨 Ameaça: \(.vuln.summary // "Exploit Desconhecido")\n  💉 Fix: \(if $fixed != null then "Migre urgente para v\($fixed)+ (Rode: `npm install \(.name)@^\($fixed)` ou `pnpm update \(.name)@>=\($fixed)`)" else "Patch fix exato desconhecido. Forçe um update do pacote \(.name)." end)\n"
-            ' osv-results.json
-
+          if [ "$GATE_FAILED" = "true" ]; then
+            echo "══════════════════════════════════════════"
+            echo "🔴 SECURITY GATE: FAILED"
+            echo "══════════════════════════════════════════"
+            echo "O pipeline será bloqueado. Corrija os problemas acima antes de fazer merge."
             exit 1
           fi
 
-          echo ""
-          echo "✅ Nenhuma vulnerabilidade crítica em dependências diretas"
+          echo "══════════════════════════════════════════"
+          echo "🟢 SECURITY GATE: PASSED"
+          echo "══════════════════════════════════════════"
+
+# =====================================================
+# 📤 SARIF Upload — GitHub Security Tab
+# =====================================================
+
+      - name: Upload Semgrep SARIF
+        if: always() && hashFiles('semgrep-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep-results.sarif
+          category: semgrep
+        continue-on-error: true
+
+      - name: Upload Gitleaks SARIF
+        if: always() && hashFiles('gitleaks-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks-results.sarif
+          category: gitleaks
+        continue-on-error: true
 
 # =====================================================
 # 📊 Summary
@@ -344,13 +454,19 @@ jobs:
           echo "══════════════════════════════════════════"
           echo ""
           echo "Estratégia do Gate:"
-          echo "  🔴 BLOCK  → Deps diretas com HIGH/CRITICAL"
+          echo "  🔴 BLOCK  → Segredos detectados (Gitleaks)"
+          echo "  🔴 BLOCK  → Vulnerabilidades ERROR (Semgrep)"
+          echo "  🔴 BLOCK  → Deps diretas com HIGH/CRITICAL (OSV)"
           echo "  🟡 WARN   → Deps transitivas com HIGH/CRITICAL"
-          echo "  🟢 PASS   → Sem vulnerabilidades críticas diretas"
+          echo "  🟢 PASS   → Sem vulnerabilidades críticas"
           echo ""
           if [ -f direct-deps.json ]; then
             TOTAL_DIRECT=$(jq 'length' direct-deps.json)
             echo "  📦 Dependências diretas monitoradas: $TOTAL_DIRECT"
           fi
+          if [ -f semgrep-results.json ]; then
+            TOTAL_FINDINGS=$(jq '.results | length' semgrep-results.json 2>/dev/null || echo "N/A")
+            BLOCKING_FINDINGS=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' semgrep-results.json 2>/dev/null || echo "N/A")
+            echo "  🛡️ Semgrep findings total: $TOTAL_FINDINGS (blocking: $BLOCKING_FINDINGS)"
+          fi
           echo "══════════════════════════════════════════"
-

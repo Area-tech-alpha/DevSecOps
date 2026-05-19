@@ -45,10 +45,8 @@ if [ "$SKIP_GITLEAKS" = "false" ]; then
     GITLEAKS_ARGS+=("--config=$CONFIG_SEC/gitleaks.toml")
   fi
 
-  # Report output if requested
-  if [ "${REPORT_FORMAT:-text}" != "text" ]; then
-    GITLEAKS_ARGS+=("--report-format" "json" "--report-path" "/tmp/gitleaks-report.json")
-  fi
+  # Always generate JSON report for programmatic validation
+  GITLEAKS_ARGS+=("--report-format" "json" "--report-path" "/tmp/gitleaks-report.json")
 
   gitleaks "${GITLEAKS_ARGS[@]}" &
   PID_GIT=$!
@@ -84,6 +82,12 @@ if [ "$SKIP_OSV" = "false" ]; then
 
     # SECURITY: Use bash array for arguments
     CMD_ARGS=("scan" "--format" "json")
+
+    # Wire config file if available
+    if [ -n "$CONFIG_SEC" ] && [ -f "$CONFIG_SEC/osv-scanner.toml" ]; then
+      CMD_ARGS+=("--config=$CONFIG_SEC/osv-scanner.toml")
+    fi
+
     while IFS= read -r LF; do
       [ -n "$LF" ] && CMD_ARGS+=("-L" "$LF")
     done <<< "$LOCKFILES"
@@ -116,12 +120,11 @@ if [ "$SKIP_SEMGREP" = "false" ]; then
     SEMGREP_ARGS+=("--config=$CONFIG_SEC/semgrep.yml")
   fi
 
-  # Report output
-  if [ "${REPORT_FORMAT:-text}" != "text" ]; then
-    SEMGREP_ARGS+=("--json" "--output" "/tmp/semgrep-report.json")
-  else
-    SEMGREP_ARGS+=("--quiet")
-  fi
+  # Always generate JSON for programmatic validation (defense-in-depth)
+  SEMGREP_ARGS+=("--json" "--output" "/tmp/semgrep-results.json")
+  # --error makes semgrep exit non-zero on findings
+  # --severity ERROR only fails on ERROR-level rules
+  SEMGREP_ARGS+=("--error" "--severity" "ERROR")
 
   semgrep "${SEMGREP_ARGS[@]}" &
   PID_SEM=$!
@@ -169,14 +172,22 @@ else
   echo -e "  ${GREEN}✅ Gitleaks: Nenhum segredo detectado${NC}"
 fi
 
-# Semgrep
+# Semgrep — defense-in-depth: validate JSON output regardless of exit code
+SEMGREP_BLOCKING=0
+if [ "$SKIP_SEMGREP" = "false" ] && [ -f /tmp/semgrep-results.json ]; then
+  SEMGREP_BLOCKING=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' /tmp/semgrep-results.json 2>/dev/null || echo 0)
+fi
+
 if [ "$SKIP_SEMGREP" = "true" ]; then
   echo -e "  ${DIM}⏩ Semgrep: Pulado (não instalado)${NC}"
-elif [ $EXIT_SEM -ne 0 ]; then
-  echo -e "  ${RED}❌ Semgrep: Vulnerabilidades de código detectadas!${NC}"
+elif [ $EXIT_SEM -ne 0 ] || [ "$SEMGREP_BLOCKING" -gt 0 ]; then
+  echo -e "  ${RED}❌ Semgrep: $SEMGREP_BLOCKING vulnerabilidade(s) ERROR-severity detectada(s)!${NC}"
+  if [ -f /tmp/semgrep-results.json ] && [ "$SEMGREP_BLOCKING" -gt 0 ]; then
+    jq -r '.results[] | select(.extra.severity == "ERROR") | "    🚨 [\(.check_id)] \(.path):\(.start.line) — \(.extra.message)"' /tmp/semgrep-results.json
+  fi
   OVERALL_EXIT=1
 else
-  echo -e "  ${GREEN}✅ Semgrep: Nenhuma vulnerabilidade de código${NC}"
+  echo -e "  ${GREEN}✅ Semgrep: Nenhuma vulnerabilidade blocking${NC}"
 fi
 
 # ══════════════════════════════════════════
