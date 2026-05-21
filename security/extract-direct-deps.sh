@@ -12,33 +12,50 @@ if [ -f package.json ] && jq -e . package.json >/dev/null 2>&1; then
   # Apenas dependencies (prod) — devDependencies não bloqueiam
   while IFS= read -r dep; do
     [ -n "$dep" ] && names+=("$dep")
-  done < <(jq -r '(.dependencies // {} | keys[]) | unique | .[]' package.json 2>/dev/null || true)
+  done < <(jq -r '(.dependencies // {}) | keys[]' package.json 2>/dev/null || true)
 
 elif [ -f package-lock.json ] && jq -e . package-lock.json >/dev/null 2>&1; then
   lock_ver=$(jq -r '.lockfileVersion // 1' package-lock.json)
   if [ "${lock_ver:-1}" -ge 2 ]; then
     while IFS= read -r dep; do
       [ -n "$dep" ] && names+=("$dep")
-    done < <(jq -r '(.packages[""].dependencies // {} | keys[]) | .[]' package-lock.json 2>/dev/null || true)
+    done < <(jq -r '(.packages[""].dependencies // {}) | keys[]' package-lock.json 2>/dev/null || true)
   else
     while IFS= read -r dep; do
       [ -n "$dep" ] && names+=("$dep")
-    done < <(jq -r '(.dependencies // {} | keys[]) | .[]' package-lock.json 2>/dev/null || true)
+    done < <(jq -r '(.dependencies // {}) | keys[]' package-lock.json 2>/dev/null || true)
   fi
 
 elif [ -f go.mod ]; then
   in_block=0
   while IFS= read -r line; do
-    case "$line" in
-      "require ("|"require(") in_block=1; continue ;;
-    esac
+    # Remove leading/trailing spaces
+    line=$(echo "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    [ -z "$line" ] && continue
+
+    if [[ "$line" =~ ^"require (" || "$line" =~ ^"require(" ]]; then
+      in_block=1
+      continue
+    fi
+
     if [ "$in_block" -eq 1 ]; then
-      case "$line" in
-        ")"*) in_block=0; continue ;;
-      esac
+      if [[ "$line" =~ ^")" ]]; then
+        in_block=0
+        continue
+      fi
+      if [[ "$line" =~ "// indirect" ]]; then
+        continue
+      fi
       dep=$(echo "$line" | awk '{print $1}')
-      [[ "$dep" == //* ]] && continue
       [ -n "$dep" ] && names+=("$dep")
+    else
+      if [[ "$line" =~ ^"require " ]]; then
+        if [[ "$line" =~ "// indirect" ]]; then
+          continue
+        fi
+        dep=$(echo "$line" | awk '{print $2}')
+        [ -n "$dep" ] && names+=("$dep")
+      fi
     fi
   done < go.mod
 
@@ -58,4 +75,5 @@ if [ "${#names[@]}" -eq 0 ]; then
   exit 0
 fi
 
-printf '%s\n' "${names[@]}" | sort -u | jq -R -s 'split("\n") | map(select(length > 0))'
+# Print all unique items, mapped to lowercase for robust matching
+printf '%s\n' "${names[@]}" | sort -u | jq -R -s 'split("\n") | map(select(length > 0) | ascii_downcase)'

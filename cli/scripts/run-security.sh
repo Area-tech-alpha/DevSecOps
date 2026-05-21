@@ -251,7 +251,7 @@ else
         .results[]?
         | (.packages[]? | . as \$pkg | .vulnerabilities[]? | {vuln: ., name: \$pkg.package.name, ver: \$pkg.package.version})
         | select(
-            (.name as \$n | \$direct[0] | index(\$n) != null)
+            ((.name | ascii_downcase) as \$n | \$direct[0] | index(\$n) != null)
             and ${SEVERITY_FILTER}
           )
       ] | length
@@ -266,7 +266,7 @@ else
         .results[]?
         | (.packages[]? | . as \$pkg | .vulnerabilities[]? | {vuln: ., name: \$pkg.package.name, ver: \$pkg.package.version})
         | select(
-            (.name as \$n | \$direct[0] | index(\$n) == null)
+            ((.name | ascii_downcase) as \$n | \$direct[0] | index(\$n) == null)
             and ${SEVERITY_FILTER}
           )
       ] | length
@@ -287,7 +287,7 @@ else
       .results[]?
       | (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version})
       | select(
-          (.name as $n | $direct[0] | index($n) == null)
+          ((.name | ascii_downcase) as $n | $direct[0] | index($n) == null)
           and (
             (.vuln.database_specific.cvssScore // 0) >= 7
             or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
@@ -310,7 +310,7 @@ else
       .results[]?
       | (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version})
       | select(
-          (.name as $n | $direct[0] | index($n) != null)
+          ((.name | ascii_downcase) as $n | $direct[0] | index($n) != null)
           and (
             (.vuln.database_specific.cvssScore // 0) >= 7
             or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))

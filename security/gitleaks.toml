@@ -71,6 +71,12 @@ paths = [
     '''(?i)package-lock\.json$''',
     '''(?i)yarn\.lock$''',
     '''(?i)devsecops/''',
+    '''(?i)_test\.go$''',
+    '''(?i)testdata/''',
+    '''(?i)go\.sum$''',
+    '''(?i)test_.*\.py$''',
+    '''(?i).*_test\.py$''',
+    '''(?i)poetry\.lock$''',
 ]
 regexes = [
     '''(?i)['"][^'"]*(?:atualiza[çc][ãa]o|altera[çc][ãa]o)\s+de\s+senha[^'"]*['"]''',

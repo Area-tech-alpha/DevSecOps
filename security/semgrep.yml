@@ -30,6 +30,11 @@ rules:
         - "**/fixtures/**"
         - "**/e2e/**"
         - "**/devsecops/**"
+        - "**/*_test.go"
+        - "**/testdata/**"
+        - "**/test_*.py"
+        - "**/*_test.py"
+        - "**/conftest.py"
 
   - id: devsecops.security.hardcoded-connection-string
     patterns:
@@ -48,6 +53,11 @@ rules:
         - "**/tests/**"
         - "**/__tests__/**"
         - "**/devsecops/**"
+        - "**/*_test.go"
+        - "**/testdata/**"
+        - "**/test_*.py"
+        - "**/*_test.py"
+        - "**/conftest.py"
 
   - id: devsecops.security.insecure-random
     patterns:
@@ -62,3 +72,8 @@ rules:
         - "**/__tests__/**"
         - "**/*.test.ts"
         - "**/*.test.tsx"
+        - "**/*_test.go"
+        - "**/testdata/**"
+        - "**/test_*.py"
+        - "**/*_test.py"
+        - "**/conftest.py"
