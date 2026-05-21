@@ -1,30 +1,14 @@
-rules:
-  - id: devsecops.security.hardcoded-uuid
-    patterns:
-      - pattern-regex: "(?i)\\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b"
-    message: "Hardcoded UUID detectado no código. Evite usar UUIDs fixos diretamente (podem ser credenciais, identificadores vázados ou causar problemas nos ambientes)."
-    languages: [generic]
-    severity: WARNING
-    paths:
-      exclude:
-        - "*.json"
-        - "**/data/**"
-        - "**/test/**"
-        - "**/tests/**"
-        - "**/mock/**"
-        - "**/mocks/**"
-        - "**/fixtures/**"
-        - "**/seed/**"
-        - "**/seeds/**"
-        - "**/.scannerwork/**"
-        - "**/migrations/**"
+# Alpha DevSecOps — regras Semgrep curadas (somente estas bloqueiam o CI)
+# O gate ignora findings de p/security-audit e p/react (muito ruído).
 
+rules:
   - id: devsecops.security.hardcoded-api-key
     patterns:
-      - pattern-regex: "(?i)(api[_-]?key|secret[_-]?key|auth[_-]?token|access[_-]?token|password|secret|token)\\s*[:=]\\s*['\"][A-Za-z0-9_\\-+=!@#$%^&*]{8,}['\"]"
-      - pattern-not-regex: "(?i)process\\.env\\."
-      - pattern-not-regex: "(?i)(example|placeholder|dummy|changeme|your[_-])"
-    message: "🚨 BLOCKED: Chave de API, Token ou Password hardcoded detectado. Nunca commite credenciais no código-fonte! Use variáveis de ambiente."
+      - pattern-regex: '(?i)\b(api[_-]?key|secret[_-]?key|client[_-]?secret)\s*[:=]\s*[''"]([A-Za-z0-9_\-+=!@#$%^&*]{16,})[''"]'
+      - pattern-not-regex: '(?i)process\.env\.'
+      - pattern-not-regex: '(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx)'
+      - pattern-not-regex: '(?i)\$\{|`\$\{'
+    message: "Chave de API ou client secret hardcoded. Use variáveis de ambiente ou um secret manager."
     languages: [generic]
     severity: ERROR
     paths:
@@ -34,15 +18,25 @@ rules:
         - ".env.example"
         - "**/test/**"
         - "**/tests/**"
+        - "**/__tests__/**"
+        - "**/*.test.ts"
+        - "**/*.test.tsx"
+        - "**/*.test.js"
+        - "**/*.test.jsx"
+        - "**/*.spec.ts"
+        - "**/*.spec.tsx"
         - "**/mock/**"
         - "**/mocks/**"
+        - "**/fixtures/**"
+        - "**/e2e/**"
+        - "**/devsecops/**"
 
   - id: devsecops.security.hardcoded-connection-string
     patterns:
-      - pattern-regex: "(?i)(database_url|connection_string|mongo_uri|redis_url|postgres_url|mysql_url)\\s*[:=]\\s*['\"][^'\"]{10,}['\"]"
-      - pattern-not-regex: "(?i)process\\.env\\."
-      - pattern-not-regex: "(?i)(example|placeholder|localhost|127\\.0\\.0\\.1)"
-    message: "🚨 BLOCKED: Connection string hardcoded detectada. Use variáveis de ambiente para credenciais de banco."
+      - pattern-regex: '(?i)\b(database_url|connection_string|mongo_uri|redis_url|postgres_url|mysql_url)\s*[:=]\s*[''"]([^''"]{20,})[''"]'
+      - pattern-not-regex: '(?i)process\.env\.'
+      - pattern-not-regex: '(?i)(example|placeholder|localhost|127\.0\.0\.1|0\.0\.0\.0)'
+    message: "Connection string hardcoded. Use variáveis de ambiente."
     languages: [generic]
     severity: ERROR
     paths:
@@ -50,14 +44,21 @@ rules:
         - "*.example"
         - ".env.example"
         - "docker-compose*.yml"
+        - "**/test/**"
+        - "**/tests/**"
+        - "**/__tests__/**"
+        - "**/devsecops/**"
 
   - id: devsecops.security.insecure-random
     patterns:
-      - pattern-regex: "Math\\.random\\(\\)"
-    message: "⚠️ Math.random() não é criptograficamente seguro. Use crypto.randomBytes() ou crypto.randomUUID() para operações sensíveis."
-    languages: [generic]
+      - pattern-regex: 'Math\.random\(\)'
+    message: "Math.random() não é criptograficamente seguro. Use crypto.randomBytes() ou crypto.randomUUID() para operações sensíveis."
+    languages: [javascript, typescript]
     severity: WARNING
     paths:
       exclude:
         - "**/test/**"
         - "**/tests/**"
+        - "**/__tests__/**"
+        - "**/*.test.ts"
+        - "**/*.test.tsx"

@@ -110,8 +110,11 @@ COPY --from=builder /tools/golangci-lint /usr/local/bin/golangci-lint
 
 # ── Embed DevSecOps configs ──
 # Build context = repo root (docker build -f cli/Dockerfile .)
-COPY security/gitleaks.toml     /opt/alpha-ci/config/security/gitleaks.toml
-COPY security/osv-scanner.toml  /opt/alpha-ci/config/security/osv-scanner.toml
+COPY security/gitleaks.toml           /opt/alpha-ci/config/security/gitleaks.toml
+COPY security/osv-scanner.toml        /opt/alpha-ci/config/security/osv-scanner.toml
+COPY security/semgrep.yml             /opt/alpha-ci/config/security/semgrep.yml
+COPY security/extract-direct-deps.sh  /opt/alpha-ci/config/security/extract-direct-deps.sh
+RUN chmod +x /opt/alpha-ci/config/security/extract-direct-deps.sh
 COPY lint/eslint.config.mjs     /opt/alpha-ci/config/lint/eslint.config.mjs
 # NOTE: .eslintignore removido — ESLint 9 Flat Config usa apenas o campo `ignores` do eslint.config.mjs
 COPY lint/.editorconfig         /opt/alpha-ci/config/lint/.editorconfig

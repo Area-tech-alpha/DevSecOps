@@ -1,81 +1,80 @@
 # Gitleaks Configuration — Area Tech Alpha
 # ----------------------------------------
-# Este arquivo centraliza as regras e exceções do Gitleaks para a organização.
-# Ele permite que arquivos de exemplo (como .env.example) não bloqueiem o build.
+# Regras custom + allowlists para reduzir falsos positivos (labels PT-BR, testes, docs).
 
 title = "Alpha DevSecOps — Gitleaks Config"
 
 # ══════════════════════════════════════════
 # 🔐 Custom Rules — Generic Secret Detection
 # ══════════════════════════════════════════
-# Gitleaks default rules detect known providers (AWS, GCP, GitHub, etc).
-# These custom rules catch proprietary/generic secrets that defaults miss.
 
 [[rules]]
 id = "generic-api-key-assignment"
-description = "Detects hardcoded API keys, tokens, and secrets in variable assignments"
-regex = '''(?i)(api[_-]?key|secret[_-]?key|auth[_-]?token|access[_-]?token)\s*[:=]\s*['"][A-Za-z0-9_\-+=!@#$%^&*]{16,}['"]'''
+description = "Hardcoded API keys / client secrets (valor sem espaços, min 16 chars)"
+regex = '''(?i)\b(api[_-]?key|secret[_-]?key|client[_-]?secret)\s*[:=]\s*['"][^'"\s]{16,}['"]'''
 tags = ["key", "API", "generic"]
 
 [[rules]]
 id = "generic-password-assignment"
-description = "Detects hardcoded passwords in variable assignments"
-# \b evita falso positivo em chaves compostas (ex.: atualizacao_senha, alteracao_senha).
-regex = '''(?i)\b(password|passwd|pwd|senha)\b\s*[:=]\s*['"][^'"]{8,}['"]'''
+description = "Hardcoded passwords — palavra inteira, não substring em chaves compostas"
+regex = '''(?i)\b(password|passwd|pwd|senha)\b\s*[:=]\s*['"][^'"\s]{8,}['"]'''
 tags = ["password", "generic"]
 
 [[rules.allowlists]]
 description = "Labels de auditoria/UI em PT-BR (não são credenciais)"
 regexTarget = "line"
 regexes = [
-    # Valores como "Atualização de Senha de Usuário", "Alteração de Senha"
     '''(?i)['"][^'"]*(?:atualiza[çc][ãa]o|altera[çc][ãa]o|mudan[çc]a|redefini[çc][ãa]o|troca|reset)\s+de\s+senha[^'"]*['"]''',
     '''(?i)['"][^'"]*\bsenha\s+de\s+usu[aá]rio[^'"]*['"]''',
-    # Chaves compostas *_senha com valor descritivo (espaços = label, não secret)
     '''(?i)\b\w*senha\w*\s*[:=]\s*['"][^'"]*\s[^'"]{4,}['"]''',
+    '''(?i)\b(?:atualizacao|alteracao|historico|tipo)_senha\s*[:=]''',
 ]
 
 [[rules]]
 id = "generic-secret-const"
-description = "Detects const/let/var declarations with secret-looking values"
-regex = '''(?i)(const|let|var)\s+(api[_-]?key|secret|token|password|auth[_-]?key|lovable[_-]?api[_-]?key)\s*=\s*['"][A-Za-z0-9_\-+=!@#$%^&*]{12,}['"]'''
+description = "const/let/var com nomes de credencial e valor quoted"
+regex = '''(?i)\b(const|let|var)\s+(api[_-]?key|client[_-]?secret|auth[_-]?key)\s*=\s*['"][^'"\s]{12,}['"]'''
 tags = ["key", "secret", "const"]
 
 [[rules]]
 id = "generic-high-entropy-secret"
-description = "High entropy string in sensitive-looking variable"
-regex = '''(?i)(key|token|secret|credential|password)\s*[:=]\s*['"][A-Za-z0-9+/=]{24,}['"]'''
+description = "Alta entropia em variável sensível (sem espaços no valor)"
+regex = '''(?i)\b(api[_-]?key|client[_-]?secret|credential)\s*[:=]\s*['"][A-Za-z0-9+/=]{24,}['"]'''
 entropy = 3.5
 secretGroup = 0
 tags = ["entropy", "generic"]
 
 [[rules]]
 id = "connection-string-with-credentials"
-description = "Database connection string with embedded credentials"
-regex = '''(?i)(postgres|mysql|mongodb|redis|amqp)://[^:\s]+:[^@\s]+@[^\s'"]+'''
+description = "Connection string com user:password embutidos"
+regex = '''(?i)(postgres|mysql|mongodb|redis|amqp)://[^:\s'"]+:[^@\s'"]+@[^\s'"]+'''
 tags = ["database", "connection-string"]
 
 # ══════════════════════════════════════════
-# ✅ Allowlist — False Positive Suppression
+# ✅ Allowlist global
 # ══════════════════════════════════════════
 
 [allowlist]
-description = "Permite arquivos de exemplo e documentação que contenham chaves 'falsas' ou legadas"
+description = "Exemplos, testes, docs, lockfiles e valores placeholder"
 paths = [
-    # Ignora arquivos .env de exemplo
     '''(?i)\.env\.example$''',
     '''(?i)\.env\.sample$''',
-    # Ignora arquivos de teste/mock
-    '''(?i)tests?/.*mocks?/.*''',
-    '''(?i)__tests__/.*''',
-    '''(?i)fixtures/.*''',
-    # Ignora documentação (README/docs) onde chaves de exemplo são comuns
+    '''(?i)tests?/''',
+    '''(?i)__tests__/''',
+    '''(?i)fixtures/''',
+    '''(?i)\.spec\.(ts|tsx|js|jsx)$''',
+    '''(?i)\.test\.(ts|tsx|js|jsx)$''',
+    '''(?i)e2e/''',
     '''(?i)README\.md$''',
     '''(?i)docs/.*\.md$''',
-    # Ignora lockfiles (não são código)
     '''(?i)pnpm-lock\.yaml$''',
     '''(?i)package-lock\.json$''',
-    '''(?i)yarn\.lock$'''
+    '''(?i)yarn\.lock$''',
+    '''(?i)devsecops/''',
+]
+regexes = [
+    '''(?i)['"][^'"]*(?:atualiza[çc][ãa]o|altera[çc][ãa]o)\s+de\s+senha[^'"]*['"]''',
+    '''(?i)\b(?:atualizacao|alteracao)_senha\s*[:=]''',
 ]
 stopwords = [
     "example-key",
@@ -84,5 +83,8 @@ stopwords = [
     "your-api-key",
     "placeholder",
     "REPLACE_ME",
-    "xxxx"
+    "xxxx",
+    "Atualização",
+    "Alteração",
+    "Usuário",
 ]

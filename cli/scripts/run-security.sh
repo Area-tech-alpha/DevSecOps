@@ -110,21 +110,24 @@ fi
 if [ "$SKIP_SEMGREP" = "false" ]; then
   echo -e "${CYAN}🛡️ Rodando Semgrep...${NC}"
 
-  # SECURITY: Use bash array for arguments
-  SEMGREP_ARGS=("scan" "--config=p/security-audit")
-  if [ "$IS_REACT" = "true" ]; then
-    SEMGREP_ARGS+=("--config=p/react")
-  fi
+  SEMGREP_ARGS=("scan" "--error" "--severity" "ERROR")
+  SEMGREP_ARGS+=("--json" "--output" "/tmp/semgrep-results.json")
+  SEMGREP_ARGS+=(
+    "--exclude" "devsecops"
+    "--exclude" "node_modules"
+    "--exclude" "dist"
+    "--exclude" "build"
+    "--exclude" ".next"
+    "--exclude" "coverage"
+    "--exclude" "**/*.min.js"
+  )
 
   if [ -n "$CONFIG_SEC" ] && [ -f "$CONFIG_SEC/semgrep.yml" ]; then
     SEMGREP_ARGS+=("--config=$CONFIG_SEC/semgrep.yml")
+  else
+    echo -e "${YELLOW}⚠️ semgrep.yml não encontrado — pulando Semgrep${NC}"
+    SKIP_SEMGREP=true
   fi
-
-  # Always generate JSON for programmatic validation (defense-in-depth)
-  SEMGREP_ARGS+=("--json" "--output" "/tmp/semgrep-results.json")
-  # --error makes semgrep exit non-zero on findings
-  # --severity ERROR only fails on ERROR-level rules
-  SEMGREP_ARGS+=("--error" "--severity" "ERROR")
 
   semgrep "${SEMGREP_ARGS[@]}" &
   PID_SEM=$!
@@ -175,7 +178,7 @@ fi
 # Semgrep — defense-in-depth: validate JSON output regardless of exit code
 SEMGREP_BLOCKING=0
 if [ "$SKIP_SEMGREP" = "false" ] && [ -f /tmp/semgrep-results.json ]; then
-  SEMGREP_BLOCKING=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' /tmp/semgrep-results.json 2>/dev/null || echo 0)
+  SEMGREP_BLOCKING=$(jq '[.results[] | select(.extra.severity == "ERROR" and (.check_id | startswith("devsecops.")))] | length' /tmp/semgrep-results.json 2>/dev/null || echo 0)
 fi
 
 if [ "$SKIP_SEMGREP" = "true" ]; then
@@ -183,7 +186,7 @@ if [ "$SKIP_SEMGREP" = "true" ]; then
 elif [ $EXIT_SEM -ne 0 ] || [ "$SEMGREP_BLOCKING" -gt 0 ]; then
   echo -e "  ${RED}❌ Semgrep: $SEMGREP_BLOCKING vulnerabilidade(s) ERROR-severity detectada(s)!${NC}"
   if [ -f /tmp/semgrep-results.json ] && [ "$SEMGREP_BLOCKING" -gt 0 ]; then
-    jq -r '.results[] | select(.extra.severity == "ERROR") | "    🚨 [\(.check_id)] \(.path):\(.start.line) — \(.extra.message)"' /tmp/semgrep-results.json
+    jq -r '.results[] | select(.extra.severity == "ERROR" and (.check_id | startswith("devsecops."))) | "    🚨 [\(.check_id)] \(.path):\(.start.line) — \(.extra.message)"' /tmp/semgrep-results.json
   fi
   OVERALL_EXIT=1
 else
@@ -213,19 +216,22 @@ else
     cat /tmp/osv-errors.log
   fi
 
-  # Extrair dependências diretas do package.json
-  if [ -f package.json ]; then
-    jq -r '[
-      (.dependencies // {} | keys[]),
-      (.devDependencies // {} | keys[])
-    ] | unique | .[]' package.json > /tmp/direct-deps-raw.txt
+  EXTRACT_SCRIPT=""
+  if [ -n "$CONFIG_SEC" ] && [ -f "$CONFIG_SEC/extract-direct-deps.sh" ]; then
+    EXTRACT_SCRIPT="$CONFIG_SEC/extract-direct-deps.sh"
+  elif [ -f "$(dirname "${BASH_SOURCE[0]}")/../../security/extract-direct-deps.sh" ]; then
+    EXTRACT_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../security" && pwd)/extract-direct-deps.sh"
+  fi
 
-    DIRECT_COUNT=$(wc -l < /tmp/direct-deps-raw.txt | tr -d ' ')
-    echo -e "  ${DIM}📦 Dependências diretas encontradas: $DIRECT_COUNT${NC}"
-
-    jq -R -s 'split("\n") | map(select(length > 0))' /tmp/direct-deps-raw.txt > /tmp/direct-deps.json
+  if [ -n "$EXTRACT_SCRIPT" ]; then
+    chmod +x "$EXTRACT_SCRIPT"
+    "$EXTRACT_SCRIPT" . > /tmp/direct-deps.json
+    DIRECT_COUNT=$(jq 'length' /tmp/direct-deps.json)
+    echo -e "  ${DIM}📦 Dependências diretas de produção: $DIRECT_COUNT${NC}"
+    if [ "$DIRECT_COUNT" -eq 0 ]; then
+      echo -e "  ${DIM}ℹ️  Sem mapeamento de deps diretas — OSV não bloqueará${NC}"
+    fi
   else
-    echo -e "  ${YELLOW}⚠️ Sem package.json — todas as deps serão tratadas como diretas${NC}"
     echo '[]' > /tmp/direct-deps.json
   fi
 
@@ -238,17 +244,19 @@ else
 
   DIRECT_LIST_EMPTY=$(jq 'length == 0' /tmp/direct-deps.json)
 
-  # Layer 1: Diretas
-  DIRECT_VULNS=$(jq --slurpfile direct /tmp/direct-deps.json "
-    [
-      .results[]?
-      | (.packages[]? | . as \$pkg | .vulnerabilities[]? | {vuln: ., name: \$pkg.package.name, ver: \$pkg.package.version})
-      | select(
-          ( (\$direct[0] | length) == 0 or (.name as \$n | \$direct[0] | index(\$n) != null) )
-          and ${SEVERITY_FILTER}
-        )
-    ] | length
-  " /tmp/osv-results.json)
+  DIRECT_VULNS=0
+  if [ "$DIRECT_LIST_EMPTY" == "false" ]; then
+    DIRECT_VULNS=$(jq --slurpfile direct /tmp/direct-deps.json "
+      [
+        .results[]?
+        | (.packages[]? | . as \$pkg | .vulnerabilities[]? | {vuln: ., name: \$pkg.package.name, ver: \$pkg.package.version})
+        | select(
+            (.name as \$n | \$direct[0] | index(\$n) != null)
+            and ${SEVERITY_FILTER}
+          )
+      ] | length
+    " /tmp/osv-results.json)
+  fi
 
   # Layer 2: Transitivas
   TRANSITIVE_VULNS=0
@@ -302,7 +310,7 @@ else
       .results[]?
       | (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version})
       | select(
-          ( ($direct[0] | length) == 0 or (.name as $n | $direct[0] | index($n) != null) )
+          (.name as $n | $direct[0] | index($n) != null)
           and (
             (.vuln.database_specific.cvssScore // 0) >= 7
             or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))

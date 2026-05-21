@@ -178,6 +178,19 @@ sync_configs() {
     && echo -e "  ${GREEN}✓${NC} osv-scanner.toml atualizado" \
     || { echo -e "  ${DIM}⚠ osv-scanner.toml — usando versão embarcada${NC}"; sync_ok=false; }
 
+  curl -fsSL --max-time 10 "$DEVSECOPS_RAW/security/semgrep.yml" -o "$CONFIG_DIR/security/semgrep.yml.tmp" 2>/dev/null \
+    && validate_config_file "$CONFIG_DIR/security/semgrep.yml.tmp" \
+    && mv "$CONFIG_DIR/security/semgrep.yml.tmp" "$CONFIG_DIR/security/semgrep.yml" \
+    && echo -e "  ${GREEN}✓${NC} semgrep.yml atualizado" \
+    || { echo -e "  ${DIM}⚠ semgrep.yml — usando versão embarcada${NC}"; sync_ok=false; }
+
+  curl -fsSL --max-time 10 "$DEVSECOPS_RAW/security/extract-direct-deps.sh" -o "$CONFIG_DIR/security/extract-direct-deps.sh.tmp" 2>/dev/null \
+    && validate_config_file "$CONFIG_DIR/security/extract-direct-deps.sh.tmp" \
+    && mv "$CONFIG_DIR/security/extract-direct-deps.sh.tmp" "$CONFIG_DIR/security/extract-direct-deps.sh" \
+    && chmod +x "$CONFIG_DIR/security/extract-direct-deps.sh" \
+    && echo -e "  ${GREEN}✓${NC} extract-direct-deps.sh atualizado" \
+    || { echo -e "  ${DIM}⚠ extract-direct-deps.sh — usando versão embarcada${NC}"; sync_ok=false; }
+
   # Lint configs
   mkdir -p "$CONFIG_DIR/lint" 2>/dev/null || true
   # SECURITY: eslint.config.mjs is executable JS — only sync if content looks safe
@@ -324,7 +337,7 @@ generate_report() {
 
   [ -f /tmp/gitleaks-report.json ] && gitleaks_json=$(cat /tmp/gitleaks-report.json 2>/dev/null || echo "{}")
   [ -f /tmp/osv-results.json ] && osv_json=$(cat /tmp/osv-results.json 2>/dev/null || echo "{}")
-  [ -f /tmp/semgrep-report.json ] && semgrep_json=$(cat /tmp/semgrep-report.json 2>/dev/null || echo "{}")
+  [ -f /tmp/semgrep-results.json ] && semgrep_json=$(cat /tmp/semgrep-results.json 2>/dev/null || echo "{}")
 
   if [ "$REPORT_FORMAT" = "json" ]; then
     jq -n \

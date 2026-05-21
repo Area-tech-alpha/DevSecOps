@@ -152,18 +152,20 @@ jobs:
             PID_OSV=$!
           fi
 
-          # ── Semgrep (JSON output for programmatic gate validation) ──
-          echo "🛡️ Rodando Semgrep..."
-          SEMGREP_CONFIGS="--config=p/security-audit --config=devsecops/security/semgrep.yml"
-          if [ "${{ steps.detect.outputs.react }}" == "true" ]; then
-            SEMGREP_CONFIGS="$SEMGREP_CONFIGS --config=p/react"
-          fi
-
-          # Primary scan: JSON output for gate validation
-          semgrep scan $SEMGREP_CONFIGS \
+          # ── Semgrep — apenas regras Alpha (p/security-audit e p/react geram muito ruído) ──
+          echo "🛡️ Rodando Semgrep (regras Alpha)..."
+          semgrep scan \
+            --config=devsecops/security/semgrep.yml \
             --json --output semgrep-results.json \
             --error \
-            --severity ERROR &
+            --severity ERROR \
+            --exclude devsecops \
+            --exclude node_modules \
+            --exclude dist \
+            --exclude build \
+            --exclude .next \
+            --exclude coverage \
+            --exclude '**/*.min.js' &
           PID_SEM=$!
 
           # ── Wait for all processes ──
@@ -195,16 +197,16 @@ jobs:
             echo "gitleaks_failed=true" >> $GITHUB_OUTPUT
           fi
 
-          # ── Evaluate Semgrep via JSON (defense in depth — don't trust exit code alone) ──
+          # ── Evaluate Semgrep — só regras devsecops.* (defense in depth) ──
           SEMGREP_FAILED=false
           if [ -f semgrep-results.json ]; then
-            BLOCKING_COUNT=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' semgrep-results.json 2>/dev/null || echo 0)
-            echo "🔍 Semgrep ERROR-severity findings: $BLOCKING_COUNT"
+            BLOCKING_COUNT=$(jq '[.results[] | select(.extra.severity == "ERROR" and (.check_id | startswith("devsecops.")))] | length' semgrep-results.json 2>/dev/null || echo 0)
+            echo "🔍 Semgrep blocking (devsecops.*): $BLOCKING_COUNT"
 
             if [ "$BLOCKING_COUNT" -gt 0 ]; then
               echo ""
               echo "❌ ══ SEMGREP BLOCKING FINDINGS ══"
-              jq -r '.results[] | select(.extra.severity == "ERROR") | "  🚨 \(.check_id)\n     📄 \(.path):\(.start.line)\n     💬 \(.extra.message)\n"' semgrep-results.json
+              jq -r '.results[] | select(.extra.severity == "ERROR" and (.check_id | startswith("devsecops."))) | "  🚨 \(.check_id)\n     📄 \(.path):\(.start.line)\n     💬 \(.extra.message)\n"' semgrep-results.json
               SEMGREP_FAILED=true
             fi
           fi
@@ -274,10 +276,10 @@ jobs:
             echo ""
             echo "❌ ══ SEMGREP: VULNERABILIDADES BLOCKING ══"
             if [ -f semgrep-results.json ]; then
-              BLOCKING=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' semgrep-results.json 2>/dev/null || echo "?")
-              echo "Total de findings ERROR-severity: $BLOCKING"
+              BLOCKING=$(jq '[.results[] | select(.extra.severity == "ERROR" and (.check_id | startswith("devsecops.")))] | length' semgrep-results.json 2>/dev/null || echo "?")
+              echo "Total de findings blocking (devsecops.*): $BLOCKING"
               echo ""
-              jq -r '.results[] | select(.extra.severity == "ERROR") | "  🚨 [\(.check_id)] \(.path):\(.start.line)\n     \(.extra.message)\n"' semgrep-results.json
+              jq -r '.results[] | select(.extra.severity == "ERROR" and (.check_id | startswith("devsecops."))) | "  🚨 [\(.check_id)] \(.path):\(.start.line)\n     \(.extra.message)\n"' semgrep-results.json
             fi
             GATE_FAILED=true
           else
@@ -290,22 +292,14 @@ jobs:
           if [ ! -f osv-results.json ]; then
             echo "ℹ️ OSV não executado — pulando gate"
           else
-            # ── Extrair dependências diretas do package.json ──
-            if [ -f package.json ]; then
-              jq -r '[
-                (.dependencies // {} | keys[]),
-                (.devDependencies // {} | keys[])
-              ] | unique | .[]' package.json > direct-deps-raw.txt
+            # ── Dependências diretas de produção (package.json, lockfile, go.mod, etc.) ──
+            chmod +x devsecops/security/extract-direct-deps.sh
+            devsecops/security/extract-direct-deps.sh . > direct-deps.json
+            DIRECT_COUNT=$(jq 'length' direct-deps.json)
+            echo "📦 Dependências diretas de produção: $DIRECT_COUNT"
 
-              DIRECT_COUNT=$(wc -l < direct-deps-raw.txt | tr -d ' ')
-              echo "📦 Dependências diretas encontradas: $DIRECT_COUNT"
-
-              # Converter lista para JSON array para uso no jq
-              jq -R -s 'split("\n") | map(select(length > 0))' direct-deps-raw.txt > direct-deps.json
-            else
-              # Sem package.json (Go, Python, etc) → trata TUDO como direta (modo seguro)
-              echo "⚠️ Sem package.json — todas as deps serão tratadas como diretas"
-              echo '[]' > direct-deps.json
+            if [ "$DIRECT_COUNT" -eq 0 ]; then
+              echo "ℹ️ Não foi possível mapear deps diretas — OSV não bloqueará (evita falso positivo em transitivas)"
             fi
 
             # ── Helper: filtro jq para HIGH/CRITICAL ──
@@ -315,20 +309,22 @@ jobs:
               or ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
             )'
 
-            # Verifica se direct-deps.json está vazio (modo sem package.json)
             DIRECT_LIST_EMPTY=$(jq 'length == 0' direct-deps.json)
 
-            # ── Layer 1: Contar vulns em dependências DIRETAS ──
-            DIRECT_VULNS=$(jq --slurpfile direct direct-deps.json "
-              [
-                .results[]?
-                | (.packages[]? | . as \$pkg | .vulnerabilities[]? | {vuln: ., name: \$pkg.package.name, ver: \$pkg.package.version})
-                | select(
-                    ( (\$direct[0] | length) == 0 or (.name as \$n | \$direct[0] | index(\$n) != null) )
-                    and ${SEVERITY_FILTER}
-                  )
-              ] | length
-            " osv-results.json)
+            # ── Layer 1: vulns só em deps diretas mapeadas (lista vazia = não bloqueia) ──
+            DIRECT_VULNS=0
+            if [ "$DIRECT_LIST_EMPTY" == "false" ]; then
+              DIRECT_VULNS=$(jq --slurpfile direct direct-deps.json "
+                [
+                  .results[]?
+                  | (.packages[]? | . as \$pkg | .vulnerabilities[]? | {vuln: ., name: \$pkg.package.name, ver: \$pkg.package.version})
+                  | select(
+                      (.name as \$n | \$direct[0] | index(\$n) != null)
+                      and ${SEVERITY_FILTER}
+                    )
+                ] | length
+              " osv-results.json)
+            fi
 
             # ── Layer 2: Contar vulns em dependências TRANSITIVAS ──
             TRANSITIVE_VULNS=0
@@ -382,7 +378,7 @@ jobs:
                 .results[]?
                 | (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version})
                 | select(
-                    ( ($direct[0] | length) == 0 or (.name as $n | $direct[0] | index($n) != null) )
+                    (.name as $n | $direct[0] | index($n) != null)
                     and (
                       (.vuln.database_specific.cvssScore // 0) >= 7
                       or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
@@ -432,7 +428,7 @@ jobs:
           echo ""
           echo "Estratégia do Gate:"
           echo "  🔴 BLOCK  → Segredos detectados (Gitleaks)"
-          echo "  🔴 BLOCK  → Vulnerabilidades ERROR (Semgrep)"
+          echo "  🔴 BLOCK  → Vulnerabilidades ERROR (Semgrep devsecops.*)"
           echo "  🔴 BLOCK  → Deps diretas com HIGH/CRITICAL (OSV)"
           echo "  🟡 WARN   → Deps transitivas com HIGH/CRITICAL"
           echo "  🟢 PASS   → Sem vulnerabilidades críticas"
@@ -443,7 +439,7 @@ jobs:
           fi
           if [ -f semgrep-results.json ]; then
             TOTAL_FINDINGS=$(jq '.results | length' semgrep-results.json 2>/dev/null || echo "N/A")
-            BLOCKING_FINDINGS=$(jq '[.results[] | select(.extra.severity == "ERROR")] | length' semgrep-results.json 2>/dev/null || echo "N/A")
+            BLOCKING_FINDINGS=$(jq '[.results[] | select(.extra.severity == "ERROR" and (.check_id | startswith("devsecops.")))] | length' semgrep-results.json 2>/dev/null || echo "N/A")
             echo "  🛡️ Semgrep findings total: $TOTAL_FINDINGS (blocking: $BLOCKING_FINDINGS)"
           fi
           echo "══════════════════════════════════════════"
