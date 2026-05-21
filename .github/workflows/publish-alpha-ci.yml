@@ -26,7 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.BOT_PAT }}
 
       - uses: actions/setup-node@v4
         with:
@@ -50,7 +50,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add cli/package.json
-          git diff --staged --quiet || git commit -m "chore: bump alpha-ci to v${{ steps.bump.outputs.new_version }}"
+          git diff --staged --quiet || git commit -m "chore: bump alpha-ci to v${{ steps.bump.outputs.new_version }} [skip ci]"
           git push
 
   publish-docker:
