@@ -1,6 +1,12 @@
 # Gitleaks Configuration — Area Tech Alpha
 # ----------------------------------------
 # Regras custom + allowlists para reduzir falsos positivos (labels PT-BR, testes, docs).
+#
+# Changelog:
+#   2026-05-28 — Hardening: expandido nomes de variáveis, adicionado detecção
+#                por formato de provedor (AWS, GitHub, Stripe, Slack, Twilio,
+#                SendGrid, OpenAI), expandido connection strings, adicionado
+#                regra de JWT hardcoded, e refinado allowlists.
 
 title = "Alpha DevSecOps — Gitleaks Config"
 
@@ -10,14 +16,21 @@ title = "Alpha DevSecOps — Gitleaks Config"
 
 [[rules]]
 id = "generic-api-key-assignment"
-description = "Hardcoded API keys / client secrets (valor sem espaços, min 16 chars)"
-regex = '''(?i)\b(api[_-]?key|secret[_-]?key|client[_-]?secret)\s*[:=]\s*['"][^'"\s]{16,}['"]'''
+description = "Hardcoded API keys / tokens / secrets (valor sem espaços, min 16 chars)"
+regex = '''(?i)\b(api[_-]?key|secret[_-]?key|client[_-]?secret|auth[_-]?token|access[_-]?token|bearer[_-]?token|jwt[_-]?secret|signing[_-]?secret|encryption[_-]?key|private[_-]?key|webhook[_-]?secret|service[_-]?key|master[_-]?key|app[_-]?secret|session[_-]?secret|twilio[_-]?(?:auth[_-]?token|sid)|stripe[_-]?(?:secret|key)|openai[_-]?(?:key|api[_-]?key)|sendgrid[_-]?(?:key|api[_-]?key)|slack[_-]?(?:token|secret|signing))\s*[:=]\s*['"][^'"\s]{16,}['"]'''
 tags = ["key", "API", "generic"]
+
+[[rules.allowlists]]
+description = "Placeholders e valores de exemplo"
+regexTarget = "match"
+regexes = [
+    '''(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx|TODO|FIXME|REPLACE)''',
+]
 
 [[rules]]
 id = "generic-password-assignment"
 description = "Hardcoded passwords — palavra inteira, não substring em chaves compostas"
-regex = '''(?i)\b(password|passwd|pwd|senha)\b\s*[:=]\s*['"][^'"\s]{8,}['"]'''
+regex = '''(?i)\b(password|passwd|pwd|senha|db_pass(?:word)?|database_password|smtp_pass(?:word)?|redis_pass(?:word)?|mysql_pass(?:word)?|pg_pass(?:word)?|mongo_pass(?:word)?)\b\s*[:=]\s*['"][^'"\s]{8,}['"]'''
 tags = ["password", "generic"]
 
 [[rules.allowlists]]
@@ -28,27 +41,127 @@ regexes = [
     '''(?i)['"][^'"]*\bsenha\s+de\s+usu[aá]rio[^'"]*['"]''',
     '''(?i)\b\w*senha\w*\s*[:=]\s*['"][^'"]*\s[^'"]{4,}['"]''',
     '''(?i)\b(?:atualizacao|alteracao|historico|tipo)_senha\s*[:=]''',
+    '''(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx)''',
 ]
 
 [[rules]]
 id = "generic-secret-const"
 description = "const/let/var com nomes de credencial e valor quoted"
-regex = '''(?i)\b(const|let|var)\s+(api[_-]?key|client[_-]?secret|auth[_-]?key)\s*=\s*['"][^'"\s]{12,}['"]'''
+regex = '''(?i)\b(const|let|var)\s+(api[_-]?key|client[_-]?secret|auth[_-]?key|auth[_-]?token|jwt[_-]?secret|signing[_-]?secret|session[_-]?secret|app[_-]?secret|master[_-]?key|encryption[_-]?key|webhook[_-]?secret|private[_-]?key)\s*=\s*['"][^'"\s]{12,}['"]'''
 tags = ["key", "secret", "const"]
+
+[[rules.allowlists]]
+description = "Placeholders"
+regexTarget = "match"
+regexes = [
+    '''(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx|TODO|FIXME|REPLACE)''',
+]
 
 [[rules]]
 id = "generic-high-entropy-secret"
 description = "Alta entropia em variável sensível (sem espaços no valor)"
-regex = '''(?i)\b(api[_-]?key|client[_-]?secret|credential)\s*[:=]\s*['"][A-Za-z0-9+/=]{24,}['"]'''
+regex = '''(?i)\b(api[_-]?key|client[_-]?secret|credential|auth[_-]?token|access[_-]?token|jwt[_-]?secret|signing[_-]?secret|encryption[_-]?key|private[_-]?key)\s*[:=]\s*['"][A-Za-z0-9+/=]{24,}['"]'''
 entropy = 3.5
 secretGroup = 0
 tags = ["entropy", "generic"]
 
+# ══════════════════════════════════════════
+# 🏷️ Provider-Specific Secrets (detecção por formato do VALOR)
+# ══════════════════════════════════════════
+
+[[rules]]
+id = "aws-access-key"
+description = "AWS Access Key ID (prefixo AKIA)"
+regex = '''AKIA[0-9A-Z]{16}'''
+tags = ["aws", "key"]
+
+[[rules.allowlists]]
+description = "Chaves de exemplo da documentação AWS"
+regexTarget = "match"
+regexes = [
+    '''AKIAIOSFODNN7EXAMPLE''',
+]
+
+[[rules]]
+id = "github-pat"
+description = "GitHub Personal Access Token (ghp_, gho_, ghu_, ghs_, github_pat_)"
+regex = '''(?:ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghu_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,})'''
+tags = ["github", "token"]
+
+[[rules]]
+id = "stripe-secret"
+description = "Stripe Secret / Restricted / Publishable Key (live)"
+regex = '''(?:sk_live_|rk_live_|pk_live_)[A-Za-z0-9]{24,}'''
+tags = ["stripe", "key"]
+
+[[rules]]
+id = "slack-token"
+description = "Slack Bot / User / App token"
+regex = '''xox[bpras]-[A-Za-z0-9\-]{10,}'''
+tags = ["slack", "token"]
+
+[[rules]]
+id = "twilio-api-key"
+description = "Twilio API Key (SK) ou Account SID (AC)"
+regex = '''(?:SK|AC)[0-9a-fA-F]{32}'''
+tags = ["twilio", "key"]
+
+[[rules]]
+id = "sendgrid-api-key"
+description = "SendGrid API Key"
+regex = '''SG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}'''
+tags = ["sendgrid", "key"]
+
+[[rules]]
+id = "openai-api-key"
+description = "OpenAI API Key (sk- ou sk-proj-)"
+regex = '''sk-(?:proj-)?[A-Za-z0-9_\-]{20,}'''
+tags = ["openai", "key"]
+
+[[rules.allowlists]]
+description = "Exclude Stripe sk_live_ keys (caught by stripe-secret rule)"
+regexTarget = "match"
+regexes = [
+    '''sk_live_''',
+]
+
+[[rules]]
+id = "webhook-signing-secret"
+description = "Webhook signing secret (Stripe/GitHub whsec_)"
+regex = '''whsec_[A-Za-z0-9]{24,}'''
+tags = ["webhook", "secret"]
+
+[[rules]]
+id = "hardcoded-jwt"
+description = "JWT token hardcoded (3 segmentos base64url separados por ponto)"
+regex = '''eyJ[A-Za-z0-9_\-]{20,}\.eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}'''
+tags = ["jwt", "token"]
+
+[[rules.allowlists]]
+description = "JWTs de exemplo em docs"
+regexTarget = "line"
+regexes = [
+    '''(?i)(example|placeholder|dummy|test|fake|sample|documentation)''',
+]
+
+# ══════════════════════════════════════════
+# 🗄️ Connection Strings
+# ══════════════════════════════════════════
+
 [[rules]]
 id = "connection-string-with-credentials"
 description = "Connection string com user:password embutidos"
-regex = '''(?i)(postgres|mysql|mongodb|redis|amqp)://[^:\s'"]+:[^@\s'"]+@[^\s'"]+'''
+regex = '''(?i)(postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis(?:s)?|amqps?)://[^:\s'"]+:[^@\s'"]+@[^\s'"]+'''
 tags = ["database", "connection-string"]
+
+[[rules.allowlists]]
+description = "Conexões de desenvolvimento local"
+regexTarget = "match"
+regexes = [
+    '''(?i)(localhost|127\.0\.0\.1|0\.0\.0\.0|::1|host\.docker\.internal)''',
+    '''(?i)(user:pass|username:password|admin:admin|root:root)''',
+    '''(?i)(example|placeholder|dummy|changeme)''',
+]
 
 # ══════════════════════════════════════════
 # ✅ Allowlist global
@@ -62,9 +175,13 @@ paths = [
     '''(?i)tests?/''',
     '''(?i)__tests__/''',
     '''(?i)fixtures/''',
+    '''(?i)stubs/''',
     '''(?i)\.spec\.(ts|tsx|js|jsx)$''',
     '''(?i)\.test\.(ts|tsx|js|jsx)$''',
+    '''(?i)\.stories\.(ts|tsx|js|jsx)$''',
     '''(?i)e2e/''',
+    '''(?i)cypress/''',
+    '''(?i)playwright/''',
     '''(?i)README\.md$''',
     '''(?i)docs/.*\.md$''',
     '''(?i)pnpm-lock\.yaml$''',
@@ -76,7 +193,10 @@ paths = [
     '''(?i)go\.sum$''',
     '''(?i)test_.*\.py$''',
     '''(?i).*_test\.py$''',
+    '''(?i)conftest\.py$''',
     '''(?i)poetry\.lock$''',
+    '''(?i)mock/''',
+    '''(?i)mocks/''',
 ]
 regexes = [
     '''(?i)['"][^'"]*(?:atualiza[çc][ãa]o|altera[çc][ãa]o)\s+de\s+senha[^'"]*['"]''',
@@ -89,7 +209,10 @@ stopwords = [
     "your-api-key",
     "placeholder",
     "REPLACE_ME",
+    "REPLACE_WITH",
     "xxxx",
+    "TODO",
+    "FIXME",
     "Atualização",
     "Alteração",
     "Usuário",

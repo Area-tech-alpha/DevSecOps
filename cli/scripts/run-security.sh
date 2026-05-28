@@ -6,8 +6,19 @@
 # ╚══════════════════════════════════════════════════════════════╝
 
 set -uo pipefail
+
+# Fallback for WORKSPACE if not defined
+WORKSPACE="${WORKSPACE:-$(pwd)}"
 cd "$WORKSPACE"
 
+# Define colors if not defined
+RED="${RED:-'\033[0;31m'}"
+GREEN="${GREEN:-'\033[0;32m'}"
+YELLOW="${YELLOW:-'\033[1;33m'}"
+CYAN="${CYAN:-'\033[0;36m'}"
+DIM="${DIM:-'\033[2m'}"
+BOLD="${BOLD:-'\033[1m'}"
+NC="${NC:-'\033[0m'}"
 # Garante que git confia no workspace (container UID ≠ host UID)
 # SECURITY: Only trust the specific workspace, not wildcard '*'
 git config --global --add safe.directory "$WORKSPACE" 2>/dev/null || true
@@ -110,7 +121,7 @@ fi
 if [ "$SKIP_SEMGREP" = "false" ]; then
   echo -e "${CYAN}🛡️ Rodando Semgrep...${NC}"
 
-  SEMGREP_ARGS=("scan" "--error" "--severity" "ERROR")
+  SEMGREP_ARGS=("scan" "--quiet" "--error" "--severity" "ERROR")
   SEMGREP_ARGS+=("--json" "--output" "/tmp/semgrep-results.json")
   SEMGREP_ARGS+=(
     "--exclude" "devsecops"
@@ -157,7 +168,11 @@ fi
 set -e
 
 echo ""
+echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
+echo -e "${DIM}Processamento paralelo concluído:${NC}"
 echo -e "${DIM}EXIT_GIT=$EXIT_GIT | EXIT_OSV=$EXIT_OSV | EXIT_SEM=$EXIT_SEM${NC}"
+echo -e "${CYAN}──────────────────────────────────────────────────${NC}"
+echo ""
 
 # ══════════════════════════════════════════
 # 🚨 Evaluate Results
@@ -178,15 +193,21 @@ fi
 # Semgrep — defense-in-depth: validate JSON output regardless of exit code
 SEMGREP_BLOCKING=0
 if [ "$SKIP_SEMGREP" = "false" ] && [ -f /tmp/semgrep-results.json ]; then
-  SEMGREP_BLOCKING=$(jq '[.results[] | select(.extra.severity == "ERROR" and (.check_id | startswith("devsecops.")))] | length' /tmp/semgrep-results.json 2>/dev/null || echo 0)
+  SEMGREP_BLOCKING=$(jq '[.results[] | select(.extra.severity == "ERROR" and (.check_id | contains("devsecops.")))] | length' /tmp/semgrep-results.json 2>/dev/null || echo 0)
 fi
 
 if [ "$SKIP_SEMGREP" = "true" ]; then
   echo -e "  ${DIM}⏩ Semgrep: Pulado (não instalado)${NC}"
 elif [ $EXIT_SEM -ne 0 ] || [ "$SEMGREP_BLOCKING" -gt 0 ]; then
-  echo -e "  ${RED}❌ Semgrep: $SEMGREP_BLOCKING vulnerabilidade(s) ERROR-severity detectada(s)!${NC}"
+  echo -e "  ${RED}${BOLD}❌ SEMGREP: $SEMGREP_BLOCKING VULNERABILIDADE(S) ENCONTRADA(S)${NC}"
   if [ -f /tmp/semgrep-results.json ] && [ "$SEMGREP_BLOCKING" -gt 0 ]; then
-    jq -r '.results[] | select(.extra.severity == "ERROR" and (.check_id | startswith("devsecops."))) | "    🚨 [\(.check_id)] \(.path):\(.start.line) — \(.extra.message)"' /tmp/semgrep-results.json
+    echo -e "  ${DIM}──────────────────────────────────────────────────${NC}"
+    jq -r '.results[] | select(.extra.severity == "ERROR" and (.check_id | contains("devsecops."))) | "  🚨 \(.path):\(.start.line)\n     \(.extra.message) [\(.check_id)]\n"' /tmp/semgrep-results.json
+    
+    # GitHub Actions annotations
+    if [ "${GITHUB_ACTIONS:-}" == "true" ]; then
+      jq -r '.results[] | select(.extra.severity == "ERROR" and (.check_id | contains("devsecops."))) | "::error file=\(.path),line=\(.start.line),title=Vulnerabilidade SAST (\(.check_id))::\(.extra.message)"' /tmp/semgrep-results.json
+    fi
   fi
   OVERALL_EXIT=1
 else
@@ -305,7 +326,8 @@ else
   # Diretas — BLOCK (bloqueiam o pipeline)
   if (( DIRECT_VULNS > 0 )); then
     echo ""
-    echo -e "${RED}❌ ══ DIRETAS COM VULNERABILIDADES (BLOCKING) ══${NC}"
+    echo -e "${RED}${BOLD}❌ ══ DIRETAS COM VULNERABILIDADES (BLOCKING) ══${NC}"
+    echo -e "${DIM}──────────────────────────────────────────────────${NC}"
     jq -r --slurpfile direct /tmp/direct-deps.json '
       .results[]?
       | (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version})
@@ -318,8 +340,25 @@ else
           )
         )
       | ([ .vuln.affected[]? | .ranges[]?.events[]?.fixed | select(type=="string") ] | .[0]) as $fixed
-      | "• \(.vuln.id // "N/A") 🎯 Alvo: \(.name // "Desconhecido")@\(.ver // "?")\n  🚨 Ameaça: \(.vuln.summary // "Exploit Desconhecido")\n  💉 Fix: \(if $fixed != null then "Migre para v\($fixed)+ (`npm install \(.name)@^\($fixed)`)" else "Patch fix desconhecido. Force update do pacote \(.name)." end)\n"
+      | "  • \(.vuln.id // "N/A") 🎯 Alvo: \(.name // "Desconhecido")@\(.ver // "?")\n    🚨 Ameaça: \(.vuln.summary // "Exploit Desconhecido")\n    💉 Fix: \(if $fixed != null then "Migre para v\($fixed)+ (`npm install \(.name)@^\($fixed)`)" else "Patch fix desconhecido. Force update do pacote \(.name)." end)\n"
     ' /tmp/osv-results.json
+
+    if [ "${GITHUB_ACTIONS:-}" == "true" ]; then
+      jq -r --slurpfile direct /tmp/direct-deps.json '
+        .results[]?
+        | (.packages[]? | . as $pkg | .vulnerabilities[]? | {vuln: ., name: $pkg.package.name, ver: $pkg.package.version})
+        | select(
+            ((.name | ascii_downcase) as $n | $direct[0] | index($n) != null)
+            and (
+              (.vuln.database_specific.cvssScore // 0) >= 7
+              or ((.vuln.database_specific.severity // "") | ascii_upcase | test("HIGH|CRITICAL"))
+              or ((.vuln.severity[]?.score | tonumber? // 0) >= 7)
+            )
+          )
+        | ([ .vuln.affected[]? | .ranges[]?.events[]?.fixed | select(type=="string") ] | .[0]) as $fixed
+        | "::error title=\(.vuln.id // "Vulnerabilidade") em dependência direta (\(.name))::\(.vuln.summary // "Exploit Desconhecido"). Fix: \(if $fixed != null then "v\($fixed)+" else "Desconhecido" end)"
+      ' /tmp/osv-results.json
+    fi
 
     OVERALL_EXIT=1
   fi
@@ -334,11 +373,13 @@ fi
 # ══════════════════════════════════════════
 
 echo ""
-echo -e "${DIM}══════════════════════════════════════════${NC}"
-echo -e "${DIM}🔐 Security Gate Strategy:${NC}"
-echo -e "${DIM}  🔴 BLOCK  → Deps diretas com HIGH/CRITICAL${NC}"
-echo -e "${DIM}  🟡 WARN   → Deps transitivas com HIGH/CRITICAL${NC}"
-echo -e "${DIM}  🟢 PASS   → Sem vulnerabilidades críticas diretas${NC}"
-echo -e "${DIM}══════════════════════════════════════════${NC}"
+echo -e "${BOLD}═════════════════════════════════════════════════════════${NC}"
+if [ $OVERALL_EXIT -eq 0 ]; then
+  echo -e "${GREEN}${BOLD}  🎉 SUCESSO: Nenhum problema crítico de segurança!${NC}"
+else
+  echo -e "${RED}${BOLD}  ❌ FALHA: Problemas críticos de segurança detectados.${NC}"
+  echo -e "${RED}            Corrija os erros acima para seguir com o CI.${NC}"
+fi
+echo -e "${BOLD}═════════════════════════════════════════════════════════${NC}"
 
 exit $OVERALL_EXIT

@@ -1,14 +1,27 @@
 # Alpha DevSecOps — regras Semgrep curadas (somente estas bloqueiam o CI)
 # O gate ignora findings de p/security-audit e p/react (muito ruído).
+#
+# Changelog:
+#   2026-05-28 — Hardening: expandido nomes de variáveis, adicionado detecção
+#                por formato de provedor, passwords, connection strings por URI,
+#                hashes inseguros, e unificado exclusões de teste.
 
 rules:
+
+  # ══════════════════════════════════════════
+  # 🔑 Hardcoded API Key / Secret (por nome de variável)
+  # ══════════════════════════════════════════
   - id: devsecops.security.hardcoded-api-key
     patterns:
-      - pattern-regex: '(?i)\b(api[_-]?key|secret[_-]?key|client[_-]?secret)\s*[:=]\s*[''"]([A-Za-z0-9_\-+=!@#$%^&*]{16,})[''"]'
+      - pattern-regex: '(?i)\b(api[_-]?key|secret[_-]?key|client[_-]?secret|auth[_-]?token|access[_-]?token|bearer[_-]?token|jwt[_-]?secret|signing[_-]?secret|encryption[_-]?key|private[_-]?key|webhook[_-]?secret|service[_-]?key|master[_-]?key|app[_-]?secret|session[_-]?secret|twilio[_-]?(?:auth[_-]?token|sid)|stripe[_-]?(?:secret|key)|openai[_-]?(?:key|api[_-]?key)|sendgrid[_-]?(?:key|api[_-]?key)|slack[_-]?(?:token|secret|signing))\s*[:=]\s*[''""`]([A-Za-z0-9_\-+=!@#$%^&*./]{16,})[''""`]'
       - pattern-not-regex: '(?i)process\.env\.'
-      - pattern-not-regex: '(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx)'
+      - pattern-not-regex: '(?i)os\.(?:environ|getenv)'
+      - pattern-not-regex: '(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx|TODO|FIXME|REPLACE)'
       - pattern-not-regex: '(?i)\$\{|`\$\{'
-    message: "Chave de API ou client secret hardcoded. Use variáveis de ambiente ou um secret manager."
+      - pattern-not-regex: '(?i)configService\.get'
+    message: >-
+      Chave de API, token ou secret hardcoded detectado.
+      Use variáveis de ambiente ou um secret manager (Vault, AWS Secrets Manager).
     languages: [generic]
     severity: ERROR
     paths:
@@ -16,8 +29,10 @@ rules:
         - "*.example"
         - "*.sample"
         - ".env.example"
+        - ".env.sample"
         - "**/test/**"
         - "**/tests/**"
+        - "**/testing/**"
         - "**/__tests__/**"
         - "**/*.test.ts"
         - "**/*.test.tsx"
@@ -25,10 +40,19 @@ rules:
         - "**/*.test.jsx"
         - "**/*.spec.ts"
         - "**/*.spec.tsx"
+        - "**/*.spec.js"
+        - "**/*.spec.jsx"
+        - "**/*.stories.ts"
+        - "**/*.stories.tsx"
+        - "**/*.stories.js"
+        - "**/*.stories.jsx"
         - "**/mock/**"
         - "**/mocks/**"
         - "**/fixtures/**"
+        - "**/stubs/**"
         - "**/e2e/**"
+        - "**/cypress/**"
+        - "**/playwright/**"
         - "**/devsecops/**"
         - "**/*_test.go"
         - "**/testdata/**"
@@ -36,22 +60,49 @@ rules:
         - "**/*_test.py"
         - "**/conftest.py"
 
-  - id: devsecops.security.hardcoded-connection-string
+  # ══════════════════════════════════════════
+  # 🏷️ Provider-Specific Secrets (detecção por formato do VALOR)
+  # Independe do nome da variável — pega pelo prefixo/padrão do token.
+  # ══════════════════════════════════════════
+  - id: devsecops.security.provider-specific-secret
     patterns:
-      - pattern-regex: '(?i)\b(database_url|connection_string|mongo_uri|redis_url|postgres_url|mysql_url)\s*[:=]\s*[''"]([^''"]{20,})[''"]'
-      - pattern-not-regex: '(?i)process\.env\.'
-      - pattern-not-regex: '(?i)(example|placeholder|localhost|127\.0\.0\.1|0\.0\.0\.0)'
-    message: "Connection string hardcoded. Use variáveis de ambiente."
+      - pattern-regex: '(?:AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghu_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|sk_live_[A-Za-z0-9]{24,}|rk_live_[A-Za-z0-9]{24,}|pk_live_[A-Za-z0-9]{24,}|xox[bpras]-[A-Za-z0-9\-]{10,}|SG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}|SK[0-9a-fA-F]{32}|AC[0-9a-fA-F]{32}|sk-(?:proj-)?[A-Za-z0-9_\-]{20,}|whsec_[A-Za-z0-9]{24,}|eyJ[A-Za-z0-9_\-]{20,}\.eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,})'
+      - pattern-not-regex: '(?i)(example|placeholder|dummy|test|fake|sample|xxxx|0{16,}|1{16,}|a{16,})'
+    message: >-
+      Token ou credencial de provedor detectado pelo formato (AWS, GitHub, Stripe,
+      Slack, Twilio, SendGrid, OpenAI, JWT). Remova imediatamente do código e
+      rotacione a credencial — ela pode já estar comprometida no histórico git.
     languages: [generic]
     severity: ERROR
     paths:
       exclude:
         - "*.example"
+        - "*.sample"
         - ".env.example"
-        - "docker-compose*.yml"
+        - ".env.sample"
         - "**/test/**"
         - "**/tests/**"
+        - "**/testing/**"
         - "**/__tests__/**"
+        - "**/*.test.ts"
+        - "**/*.test.tsx"
+        - "**/*.test.js"
+        - "**/*.test.jsx"
+        - "**/*.spec.ts"
+        - "**/*.spec.tsx"
+        - "**/*.spec.js"
+        - "**/*.spec.jsx"
+        - "**/*.stories.ts"
+        - "**/*.stories.tsx"
+        - "**/*.stories.js"
+        - "**/*.stories.jsx"
+        - "**/mock/**"
+        - "**/mocks/**"
+        - "**/fixtures/**"
+        - "**/stubs/**"
+        - "**/e2e/**"
+        - "**/cypress/**"
+        - "**/playwright/**"
         - "**/devsecops/**"
         - "**/*_test.go"
         - "**/testdata/**"
@@ -59,19 +110,254 @@ rules:
         - "**/*_test.py"
         - "**/conftest.py"
 
+  # ══════════════════════════════════════════
+  # 🔒 Hardcoded Password (paridade com Gitleaks)
+  # ══════════════════════════════════════════
+  - id: devsecops.security.hardcoded-password
+    patterns:
+      - pattern-regex: '(?i)\b(password|passwd|pwd|senha|db_pass|db_password|database_password|smtp_password|smtp_pass|redis_password|redis_pass|mysql_password|pg_password|mongo_password)\b\s*[:=]\s*[''""`]([^''""`\s]{8,})[''""`]'
+      - pattern-not-regex: '(?i)process\.env\.'
+      - pattern-not-regex: '(?i)os\.(?:environ|getenv)'
+      - pattern-not-regex: '(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx|TODO|FIXME|REPLACE)'
+      - pattern-not-regex: '(?i)\$\{|`\$\{'
+      - pattern-not-regex: '(?i)configService\.get'
+      # Exclusão de labels PT-BR (UI de "alteração de senha" etc.)
+      - pattern-not-regex: '(?i)(atualiza[çc][ãa]o|altera[çc][ãa]o|mudan[çc]a|redefini[çc][ãa]o|troca|reset|hist[óo]rico|tipo)\s+de\s+senha'
+      - pattern-not-regex: '(?i)senha\s+de\s+usu[aá]rio'
+    message: >-
+      Password hardcoded detectado. Use variáveis de ambiente ou um secret manager.
+    languages: [generic]
+    severity: ERROR
+    paths:
+      exclude:
+        - "*.example"
+        - "*.sample"
+        - ".env.example"
+        - ".env.sample"
+        - "**/test/**"
+        - "**/tests/**"
+        - "**/testing/**"
+        - "**/__tests__/**"
+        - "**/*.test.ts"
+        - "**/*.test.tsx"
+        - "**/*.test.js"
+        - "**/*.test.jsx"
+        - "**/*.spec.ts"
+        - "**/*.spec.tsx"
+        - "**/*.spec.js"
+        - "**/*.spec.jsx"
+        - "**/*.stories.ts"
+        - "**/*.stories.tsx"
+        - "**/*.stories.js"
+        - "**/*.stories.jsx"
+        - "**/mock/**"
+        - "**/mocks/**"
+        - "**/fixtures/**"
+        - "**/stubs/**"
+        - "**/e2e/**"
+        - "**/cypress/**"
+        - "**/playwright/**"
+        - "**/devsecops/**"
+        - "**/*_test.go"
+        - "**/testdata/**"
+        - "**/test_*.py"
+        - "**/*_test.py"
+        - "**/conftest.py"
+
+  # ══════════════════════════════════════════
+  # 🗄️ Hardcoded Connection String (por nome de variável)
+  # ══════════════════════════════════════════
+  - id: devsecops.security.hardcoded-connection-string
+    patterns:
+      - pattern-regex: '(?i)\b(database_url|connection_string|mongo_uri|redis_url|postgres_url|mysql_url|db_uri|db_url|db_connection|mongo_connection|pg_connection|pg_connection_string|supabase_url|amqp_url|rabbit_url|rabbitmq_url|connection_url|database_uri|sql_connection)\s*[:=]\s*[''""`]([^''""`]{20,})[''""`]'
+      - pattern-not-regex: '(?i)process\.env\.'
+      - pattern-not-regex: '(?i)os\.(?:environ|getenv)'
+      - pattern-not-regex: '(?i)(example|placeholder|localhost|127\.0\.0\.1|0\.0\.0\.0|::1|host\.docker\.internal)'
+      - pattern-not-regex: '(?i)\$\{|`\$\{'
+      - pattern-not-regex: '(?i)configService\.get'
+    message: >-
+      Connection string hardcoded. Use variáveis de ambiente.
+    languages: [generic]
+    severity: ERROR
+    paths:
+      exclude:
+        - "*.example"
+        - "*.sample"
+        - ".env.example"
+        - ".env.sample"
+        - "**/test/**"
+        - "**/tests/**"
+        - "**/testing/**"
+        - "**/__tests__/**"
+        - "**/*.test.ts"
+        - "**/*.test.tsx"
+        - "**/*.test.js"
+        - "**/*.test.jsx"
+        - "**/*.spec.ts"
+        - "**/*.spec.tsx"
+        - "**/*.spec.js"
+        - "**/*.spec.jsx"
+        - "**/*.stories.ts"
+        - "**/*.stories.tsx"
+        - "**/*.stories.js"
+        - "**/*.stories.jsx"
+        - "**/mock/**"
+        - "**/mocks/**"
+        - "**/fixtures/**"
+        - "**/stubs/**"
+        - "**/e2e/**"
+        - "**/cypress/**"
+        - "**/playwright/**"
+        - "**/devsecops/**"
+        - "**/*_test.go"
+        - "**/testdata/**"
+        - "**/test_*.py"
+        - "**/*_test.py"
+        - "**/conftest.py"
+        - "docker-compose*.yml"
+        - "docker-compose*.yaml"
+
+  # ══════════════════════════════════════════
+  # 🗄️ Connection String por URI (detecção pelo FORMATO, independe do nome)
+  # Pega qualquer protocol://user:pass@host mesmo sem nome de variável.
+  # ══════════════════════════════════════════
+  - id: devsecops.security.connection-string-by-uri
+    patterns:
+      - pattern-regex: >-
+          (?i)(postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis(?:s)?|amqps?)://[^:\s'""`]+:[^@\s'""`]+@[^\s'""`]+
+      - pattern-not-regex: '(?i)(localhost|127\.0\.0\.1|0\.0\.0\.0|::1|host\.docker\.internal)'
+      - pattern-not-regex: '(?i)(example|placeholder|user:pass|username:password|admin:admin|root:root)'
+    message: >-
+      Connection string com credenciais embutidas detectada (user:pass@host).
+      Use variáveis de ambiente e nunca inclua credenciais diretamente na URI.
+    languages: [generic]
+    severity: ERROR
+    paths:
+      exclude:
+        - "*.example"
+        - "*.sample"
+        - ".env.example"
+        - ".env.sample"
+        - "**/test/**"
+        - "**/tests/**"
+        - "**/testing/**"
+        - "**/__tests__/**"
+        - "**/*.test.ts"
+        - "**/*.test.tsx"
+        - "**/*.test.js"
+        - "**/*.test.jsx"
+        - "**/*.spec.ts"
+        - "**/*.spec.tsx"
+        - "**/*.spec.js"
+        - "**/*.spec.jsx"
+        - "**/*.stories.ts"
+        - "**/*.stories.tsx"
+        - "**/*.stories.js"
+        - "**/*.stories.jsx"
+        - "**/mock/**"
+        - "**/mocks/**"
+        - "**/fixtures/**"
+        - "**/stubs/**"
+        - "**/e2e/**"
+        - "**/cypress/**"
+        - "**/playwright/**"
+        - "**/devsecops/**"
+        - "**/*_test.go"
+        - "**/testdata/**"
+        - "**/test_*.py"
+        - "**/*_test.py"
+        - "**/conftest.py"
+        - "docker-compose*.yml"
+        - "docker-compose*.yaml"
+
+  # ══════════════════════════════════════════
+  # 🎲 Insecure Random
+  # ══════════════════════════════════════════
   - id: devsecops.security.insecure-random
     patterns:
       - pattern-regex: 'Math\.random\(\)'
-    message: "Math.random() não é criptograficamente seguro. Use crypto.randomBytes() ou crypto.randomUUID() para operações sensíveis."
+    message: >-
+      Math.random() não é criptograficamente seguro.
+      Use crypto.randomBytes() ou crypto.randomUUID() para operações sensíveis.
     languages: [javascript, typescript]
     severity: WARNING
     paths:
       exclude:
+        - "*.example"
+        - "*.sample"
+        - ".env.example"
+        - ".env.sample"
         - "**/test/**"
         - "**/tests/**"
+        - "**/testing/**"
         - "**/__tests__/**"
         - "**/*.test.ts"
         - "**/*.test.tsx"
+        - "**/*.test.js"
+        - "**/*.test.jsx"
+        - "**/*.spec.ts"
+        - "**/*.spec.tsx"
+        - "**/*.spec.js"
+        - "**/*.spec.jsx"
+        - "**/*.stories.ts"
+        - "**/*.stories.tsx"
+        - "**/*.stories.js"
+        - "**/*.stories.jsx"
+        - "**/mock/**"
+        - "**/mocks/**"
+        - "**/fixtures/**"
+        - "**/stubs/**"
+        - "**/e2e/**"
+        - "**/cypress/**"
+        - "**/playwright/**"
+        - "**/devsecops/**"
+        - "**/*_test.go"
+        - "**/testdata/**"
+        - "**/test_*.py"
+        - "**/*_test.py"
+        - "**/conftest.py"
+
+  # ══════════════════════════════════════════
+  # 🔓 Insecure Hash / Cipher (MD5, SHA1, DES, RC4)
+  # ══════════════════════════════════════════
+  - id: devsecops.security.insecure-crypto
+    patterns:
+      - pattern-regex: '(?i)(?:createHash\s*\(\s*[''""`](?:md5|md4|sha1)[''""`]\s*\)|createCipher(?:iv)?\s*\(\s*[''""`](?:des|des-ede|des-ede3|rc4|rc2|blowfish)[''""`]|createDecipher(?:iv)?\s*\(\s*[''""`](?:des|des-ede|des-ede3|rc4|rc2|blowfish)[''""`]|hashlib\.(?:md5|sha1)\s*\()'
+    message: >-
+      Algoritmo criptográfico inseguro detectado (MD5, SHA1, DES, RC4).
+      Use SHA-256+ para hashes e AES-256-GCM para cifras simétricas.
+    languages: [generic]
+    severity: WARNING
+    paths:
+      exclude:
+        - "*.example"
+        - "*.sample"
+        - ".env.example"
+        - ".env.sample"
+        - "**/test/**"
+        - "**/tests/**"
+        - "**/testing/**"
+        - "**/__tests__/**"
+        - "**/*.test.ts"
+        - "**/*.test.tsx"
+        - "**/*.test.js"
+        - "**/*.test.jsx"
+        - "**/*.spec.ts"
+        - "**/*.spec.tsx"
+        - "**/*.spec.js"
+        - "**/*.spec.jsx"
+        - "**/*.stories.ts"
+        - "**/*.stories.tsx"
+        - "**/*.stories.js"
+        - "**/*.stories.jsx"
+        - "**/mock/**"
+        - "**/mocks/**"
+        - "**/fixtures/**"
+        - "**/stubs/**"
+        - "**/e2e/**"
+        - "**/cypress/**"
+        - "**/playwright/**"
+        - "**/devsecops/**"
         - "**/*_test.go"
         - "**/testdata/**"
         - "**/test_*.py"
