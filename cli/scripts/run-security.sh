@@ -81,7 +81,7 @@ if [ "$SKIP_OSV" = "false" ]; then
     echo "$LOCKFILES"
 
     # SECURITY: Use bash array for arguments
-    CMD_ARGS=("scan" "--format" "json")
+    CMD_ARGS=("scan" "--format" "json" "--offline-vulnerabilities")
 
     # Wire config file if available
     if [ -n "$CONFIG_SEC" ] && [ -f "$CONFIG_SEC/osv-scanner.toml" ]; then
