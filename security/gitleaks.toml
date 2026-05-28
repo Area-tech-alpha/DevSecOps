@@ -115,7 +115,7 @@ tags = ["sendgrid", "key"]
 [[rules]]
 id = "openai-api-key"
 description = "OpenAI API Key (sk- ou sk-proj-)"
-regex = '''sk-(?:proj-)?[A-Za-z0-9_\-]{20,}'''
+regex = '''\bsk-(?:proj-)?[A-Za-z0-9_\-]{20,}'''
 tags = ["openai", "key"]
 
 [[rules.allowlists]]

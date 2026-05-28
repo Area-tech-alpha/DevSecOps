@@ -66,7 +66,7 @@ rules:
   # ══════════════════════════════════════════
   - id: devsecops.security.provider-specific-secret
     patterns:
-      - pattern-regex: '(?:AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghu_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|sk_live_[A-Za-z0-9]{24,}|rk_live_[A-Za-z0-9]{24,}|pk_live_[A-Za-z0-9]{24,}|xox[bpras]-[A-Za-z0-9\-]{10,}|SG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}|SK[0-9a-fA-F]{32}|AC[0-9a-fA-F]{32}|sk-(?:proj-)?[A-Za-z0-9_\-]{20,}|whsec_[A-Za-z0-9]{24,}|eyJ[A-Za-z0-9_\-]{20,}\.eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,})'
+      - pattern-regex: '(?:AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|ghu_[A-Za-z0-9]{36}|ghs_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{22,}|\bsk_live_[A-Za-z0-9]{24,}|\brk_live_[A-Za-z0-9]{24,}|\bpk_live_[A-Za-z0-9]{24,}|\bxox[bpras]-[A-Za-z0-9\-]{10,}|\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}|\bSK[0-9a-fA-F]{32}|\bAC[0-9a-fA-F]{32}|\bsk-(?:proj-)?[A-Za-z0-9_\-]{20,}|\bwhsec_[A-Za-z0-9]{24,}|eyJ[A-Za-z0-9_\-]{20,}\.eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,})'
       - pattern-not-regex: '(?i)(example|placeholder|dummy|test|fake|sample|xxxx|0{16,}|1{16,}|a{16,})'
     message: >-
       Token ou credencial de provedor detectado pelo formato (AWS, GitHub, Stripe,
