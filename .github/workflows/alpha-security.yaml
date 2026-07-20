@@ -165,7 +165,11 @@ jobs:
             --exclude build \
             --exclude .next \
             --exclude coverage \
-            --exclude '**/*.min.js' &
+            --exclude '**/*.min.js' \
+            --exclude 'osv-results.json' \
+            --exclude 'osv-errors.log' \
+            --exclude 'semgrep-results.json' \
+            --exclude 'direct-deps.json' &
           PID_SEM=$!
 
           # ── Wait for all processes ──

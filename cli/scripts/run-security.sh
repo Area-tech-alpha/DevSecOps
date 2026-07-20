@@ -131,6 +131,10 @@ if [ "$SKIP_SEMGREP" = "false" ]; then
     "--exclude" ".next"
     "--exclude" "coverage"
     "--exclude" "**/*.min.js"
+    "--exclude" "osv-results.json"
+    "--exclude" "osv-errors.log"
+    "--exclude" "semgrep-results.json"
+    "--exclude" "direct-deps.json"
   )
 
   if [ -n "$CONFIG_SEC" ] && [ -f "$CONFIG_SEC/semgrep.yml" ]; then
