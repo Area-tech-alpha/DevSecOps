@@ -91,7 +91,7 @@ jobs:
               if [ "$last_ts" -lt "$CUTOFF" ]; then
                 # Verifica se foi mergeada no default branch
                 merged=$(gh api \
-                  "repos/$ORG/$repo/compare/$ORG:$default_branch...$ORG:$branch" \
+                  "repos/$ORG/$repo/compare/$default_branch...$branch" \
                   --jq '.status' 2>/dev/null)
 
                 # "behind" ou "identical" = branch mergeada (default tem tudo dela)
