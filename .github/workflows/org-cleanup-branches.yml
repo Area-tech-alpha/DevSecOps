@@ -1,0 +1,117 @@
+name: Org Cleanup - Stale Branches
+
+# ============================================================
+# Workflow CENTRALIZADO no DevSecOps.
+# Roda toda segunda-feira às 9h BRT (12h UTC) e apaga,
+# em todos os repos da org, branches que já foram mergeadas
+# e estão sem atividade há mais de 30 dias.
+# Usa BOT_PAT para ter acesso de escrita em toda a org.
+# ============================================================
+
+on:
+  schedule:
+    - cron: '0 12 * * 1'  # Segunda-feira 09h BRT (12h UTC)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Simulação (não apaga nada, só lista o que seria apagado)'
+        required: false
+        default: 'false'
+        type: boolean
+      days_threshold:
+        description: 'Dias sem atividade para considerar stale'
+        required: false
+        default: '30'
+
+jobs:
+  cleanup:
+    name: Delete merged stale branches
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Cleanup org branches
+        env:
+          GH_TOKEN: ${{ secrets.BOT_PAT }}
+          ORG: Area-tech-alpha
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          DAYS: ${{ inputs.days_threshold || '30' }}
+        run: |
+          CUTOFF=$(date -d "${DAYS} days ago" +%s)
+          PROTECTED="main|master|develop|staging|homolog|release|hotfix"
+
+          TOTAL_DELETED=0
+          TOTAL_SKIPPED=0
+          TOTAL_REPOS=0
+
+          echo "========================================"
+          echo " Org Branch Cleanup — $(date '+%Y-%m-%d %H:%M UTC')"
+          echo " Threshold: ${DAYS} dias | Dry run: ${DRY_RUN}"
+          echo "========================================"
+
+          repos=$(gh repo list "$ORG" --limit 200 --json name,isArchived \
+            --jq '.[] | select(.isArchived == false) | .name')
+
+          for repo in $repos; do
+            ((TOTAL_REPOS++))
+
+            # Pega o branch padrão
+            default_branch=$(gh api "repos/$ORG/$repo" --jq '.default_branch' 2>/dev/null)
+            [ -z "$default_branch" ] && continue
+
+            # Lista branches mergeadas no default (exceto o próprio default e os protegidos)
+            branches=$(gh api "repos/$ORG/$repo/branches?per_page=100&protected=false" \
+              --paginate \
+              --jq --arg def "$default_branch" --arg pat "$PROTECTED" \
+              '[.[] | select(.name != $def and (.name | test($pat) | not)) | .name]' \
+              2>/dev/null | jq -r '.[]')
+
+            for branch in $branches; do
+              # Data do último commit na branch
+              last_commit_date=$(gh api \
+                "repos/$ORG/$repo/commits?sha=$branch&per_page=1" \
+                --jq '.[0].commit.committer.date' 2>/dev/null)
+
+              [ -z "$last_commit_date" ] && continue
+
+              last_ts=$(date -d "$last_commit_date" +%s 2>/dev/null)
+              [ -z "$last_ts" ] && continue
+
+              if [ "$last_ts" -lt "$CUTOFF" ]; then
+                # Verifica se foi mergeada no default branch
+                merged=$(gh api \
+                  "repos/$ORG/$repo/compare/$ORG:$default_branch...$ORG:$branch" \
+                  --jq '.status' 2>/dev/null)
+
+                # "behind" ou "identical" = branch mergeada (default tem tudo dela)
+                if [[ "$merged" == "behind" || "$merged" == "identical" ]]; then
+                  age_days=$(( ( $(date +%s) - last_ts ) / 86400 ))
+
+                  if [ "$DRY_RUN" == "true" ]; then
+                    echo "  [DRY RUN] $repo/$branch (${age_days}d sem atividade)"
+                    ((TOTAL_DELETED++))
+                  else
+                    result=$(gh api -X DELETE \
+                      "repos/$ORG/$repo/git/refs/heads/$branch" 2>&1)
+                    if [ $? -eq 0 ]; then
+                      echo "  ✓ Deletada: $repo/$branch (${age_days}d)"
+                      ((TOTAL_DELETED++))
+                    else
+                      echo "  ✗ Erro: $repo/$branch — $result"
+                      ((TOTAL_SKIPPED++))
+                    fi
+                  fi
+                fi
+              fi
+            done
+          done
+
+          echo ""
+          echo "========================================"
+          if [ "$DRY_RUN" == "true" ]; then
+            echo " Simulação concluída."
+            echo " Seriam apagadas: ${TOTAL_DELETED} branches em ${TOTAL_REPOS} repos"
+          else
+            echo " Limpeza concluída."
+            echo " Apagadas: ${TOTAL_DELETED} | Erros: ${TOTAL_SKIPPED} | Repos: ${TOTAL_REPOS}"
+          fi
+          echo "========================================"
