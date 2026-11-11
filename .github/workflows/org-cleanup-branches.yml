@@ -39,7 +39,7 @@ jobs:
           set +e  # Não sair em erro — tratamento manual abaixo
 
           CUTOFF=$(date -d "${DAYS} days ago" +%s)
-          PROTECTED="main|master|develop|staging|homolog|release|hotfix"
+          PROTECTED="^(main|master|develop|development|dev|staging|homolog|homologacao|release|hotfix)$|^(release|hotfix|feature-base|develop)/"
 
           TOTAL_DELETED=0
           TOTAL_SKIPPED=0
