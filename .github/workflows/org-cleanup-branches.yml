@@ -70,12 +70,12 @@ jobs:
             default_branch=$(gh api "repos/$ORG/$repo" --jq '.default_branch' 2>/dev/null)
             [ -z "$default_branch" ] && continue
 
-            # Lista branches mergeadas no default (exceto o próprio default e os protegidos)
-            branches=$(gh api "repos/$ORG/$repo/branches?per_page=100&protected=false" \
+            # Lista branches (exceto o próprio default e os protegidos)
+            branches=$(gh api "repos/$ORG/$repo/branches?per_page=100" \
               --paginate \
               --jq --arg def "$default_branch" --arg pat "$PROTECTED" \
-              '[.[] | select(.name != $def and (.name | test($pat) | not)) | .name]' \
-              2>/dev/null | jq -r '.[]')
+              '.[] | select(.name != $def and (.name | test($pat) | not)) | .name' \
+              2>/dev/null)
 
             for branch in $branches; do
               # Data do último commit na branch
