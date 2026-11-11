@@ -48,8 +48,9 @@ jobs:
           echo " Threshold: ${DAYS} dias | Dry run: ${DRY_RUN}"
           echo "========================================"
 
-          repos=$(gh repo list "$ORG" --limit 200 --json name,isArchived \
-            --jq '.[] | select(.isArchived == false) | .name')
+          repos=$(gh api "orgs/$ORG/repos?per_page=100&type=all" \
+            --paginate \
+            --jq '.[] | select(.archived == false) | .name')
 
           for repo in $repos; do
             ((TOTAL_REPOS++))
