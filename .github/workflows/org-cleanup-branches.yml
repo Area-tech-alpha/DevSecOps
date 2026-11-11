@@ -36,6 +36,8 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
           DAYS: ${{ inputs.days_threshold || '30' }}
         run: |
+          set +e  # Não sair em erro — tratamento manual abaixo
+
           CUTOFF=$(date -d "${DAYS} days ago" +%s)
           PROTECTED="main|master|develop|staging|homolog|release|hotfix"
 
@@ -48,9 +50,18 @@ jobs:
           echo " Threshold: ${DAYS} dias | Dry run: ${DRY_RUN}"
           echo "========================================"
 
+          # Valida token antes de prosseguir
+          echo "Verificando credenciais..."
+          gh api user --jq '.login' || { echo "ERRO: BOT_PAT inválido ou sem permissão."; exit 1; }
+
           repos=$(gh api "orgs/$ORG/repos?per_page=100&type=all" \
             --paginate \
-            --jq '.[] | select(.archived == false) | .name')
+            --jq '.[] | select(.archived == false) | .name' 2>&1)
+
+          if [ $? -ne 0 ]; then
+            echo "ERRO ao listar repos da org: $repos"
+            exit 1
+          fi
 
           for repo in $repos; do
             ((TOTAL_REPOS++))
