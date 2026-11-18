@@ -72,14 +72,23 @@ jobs:
 # =====================================================
 
       - name: Install OSV Scanner
+        env:
+          # Versão fixa, baixada direto da URL do release. Não consulta
+          # api.github.com/.../releases/latest, que sem token estoura o rate limit
+          # do runner. Para atualizar, troque a versão aqui.
+          OSV_SCANNER_VERSION: 2.7.1
         run: |
-          OSV_URL=$(curl -s https://api.github.com/repos/google/osv-scanner/releases/latest \
-            | jq -r '.assets[] | select(.name | contains("linux_amd64") and (contains("exe") | not) and (contains("SHA256") | not)) | .browser_download_url' \
-            | head -n1)
+          set -euo pipefail
+          OSV_URL="https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
 
-          curl -L "$OSV_URL" -o osv-scanner
+          # -f: falha em HTTP de erro (sem isso o corpo do erro viraria o "binário").
+          if ! curl -fsSL --retry 3 --retry-delay 5 "$OSV_URL" -o osv-scanner; then
+            echo "::error::Não foi possível baixar o OSV Scanner v${OSV_SCANNER_VERSION} de ${OSV_URL}"
+            exit 1
+          fi
           chmod +x osv-scanner
           sudo mv osv-scanner /usr/local/bin/
+          osv-scanner --version
 
       - name: Install Gitleaks
         run: |
