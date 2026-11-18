@@ -79,28 +79,61 @@ jobs:
           OSV_SCANNER_VERSION: 2.7.1
         run: |
           set -euo pipefail
-          OSV_URL="https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_linux_amd64"
+          BASE_URL="https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}"
+          ASSET="osv-scanner_linux_amd64"
+          SUMS="osv-scanner_SHA256SUMS"
 
           # -f: falha em HTTP de erro (sem isso o corpo do erro viraria o "binário").
-          if ! curl -fsSL --retry 3 --retry-delay 5 "$OSV_URL" -o osv-scanner; then
-            echo "::error::Não foi possível baixar o OSV Scanner v${OSV_SCANNER_VERSION} de ${OSV_URL}"
+          for FILE in "$ASSET" "$SUMS"; do
+            if ! curl -fsSL --retry 3 --retry-delay 5 "${BASE_URL}/${FILE}" -o "$FILE"; then
+              echo "::error::Não foi possível baixar ${FILE} do OSV Scanner v${OSV_SCANNER_VERSION} (${BASE_URL}/${FILE})"
+              exit 1
+            fi
+          done
+
+          # Valida o binário contra o checksum publicado no próprio release.
+          grep -E "[[:space:]]${ASSET}\$" "$SUMS" > "${ASSET}.sha256" || true
+          if [ ! -s "${ASSET}.sha256" ] || ! sha256sum -c "${ASSET}.sha256"; then
+            echo "::error::Checksum inválido ou ausente para ${ASSET} (OSV Scanner v${OSV_SCANNER_VERSION}). Instalação abortada."
             exit 1
           fi
-          chmod +x osv-scanner
-          sudo mv osv-scanner /usr/local/bin/
+
+          chmod +x "$ASSET"
+          sudo mv "$ASSET" /usr/local/bin/osv-scanner
+          rm -f "$SUMS" "${ASSET}.sha256"
           osv-scanner --version
 
       - name: Install Gitleaks
+        env:
+          # Versão fixa (sem o "v"), baixada direto da URL do release, como no OSV
+          # Scanner acima. Para atualizar, troque a versão aqui.
+          GITLEAKS_VERSION: 8.30.1
         run: |
-          URL=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
-            | jq -r '.assets[] | select(.name | contains("linux_x64.tar.gz")) | .browser_download_url' \
-            | head -n1)
+          set -euo pipefail
+          BASE_URL="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          ASSET="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          SUMS="gitleaks_${GITLEAKS_VERSION}_checksums.txt"
 
-          curl -L "$URL" -o gitleaks.tar.gz
-          tar -xzf gitleaks.tar.gz gitleaks
+          # -f: falha em HTTP de erro (sem isso o corpo do erro viraria o "binário").
+          for FILE in "$ASSET" "$SUMS"; do
+            if ! curl -fsSL --retry 3 --retry-delay 5 "${BASE_URL}/${FILE}" -o "$FILE"; then
+              echo "::error::Não foi possível baixar ${FILE} do Gitleaks v${GITLEAKS_VERSION} (${BASE_URL}/${FILE})"
+              exit 1
+            fi
+          done
+
+          # Valida o binário contra o checksum publicado no próprio release.
+          grep -E "[[:space:]]${ASSET}\$" "$SUMS" > "${ASSET}.sha256" || true
+          if [ ! -s "${ASSET}.sha256" ] || ! sha256sum -c "${ASSET}.sha256"; then
+            echo "::error::Checksum inválido ou ausente para ${ASSET} (Gitleaks v${GITLEAKS_VERSION}). Instalação abortada."
+            exit 1
+          fi
+
+          tar -xzf "$ASSET" gitleaks
           chmod +x gitleaks
           sudo mv gitleaks /usr/local/bin/
-          rm gitleaks.tar.gz
+          rm -f "$ASSET" "$SUMS" "${ASSET}.sha256"
+          gitleaks version
 
       - name: Install Semgrep
         run: pip install semgrep --quiet --break-system-packages
