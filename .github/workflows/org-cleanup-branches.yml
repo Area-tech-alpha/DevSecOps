@@ -2,15 +2,15 @@ name: Org Cleanup - Stale Branches
 
 # ============================================================
 # Workflow CENTRALIZADO no DevSecOps.
-# Roda toda segunda-feira às 9h BRT (12h UTC) e apaga,
+# Roda todo dia às 9h BRT (12h UTC) e apaga,
 # em todos os repos da org, branches que já foram mergeadas
-# e estão sem atividade há mais de 6 dias.
+# e estão sem atividade há mais de 3 dias.
 # Usa BOT_PAT para ter acesso de escrita em toda a org.
 # ============================================================
 
 on:
   schedule:
-    - cron: '0 12 * * 1'  # Segunda-feira 09h BRT (12h UTC)
+    - cron: '0 12 * * *'  # Todo dia 09h BRT (12h UTC)
   workflow_dispatch:
     inputs:
       dry_run:
@@ -21,7 +21,7 @@ on:
       days_threshold:
         description: 'Dias sem atividade para considerar stale'
         required: false
-        default: '6'
+        default: '3'
 
 jobs:
   cleanup:
@@ -34,7 +34,7 @@ jobs:
           GH_TOKEN: ${{ secrets.BOT_PAT }}
           ORG: Area-tech-alpha
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
-          DAYS: ${{ inputs.days_threshold || '6' }}
+          DAYS: ${{ inputs.days_threshold || '3' }}
         run: |
           set +e  # Não sair em erro — tratamento manual abaixo
 
