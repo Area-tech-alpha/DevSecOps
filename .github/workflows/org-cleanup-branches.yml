@@ -2,9 +2,14 @@ name: Org Cleanup - Stale Branches
 
 # ============================================================
 # Workflow CENTRALIZADO no DevSecOps.
-# Roda todo dia às 9h BRT (12h UTC) e apaga,
-# em todos os repos da org, branches que já foram mergeadas
-# e estão sem atividade há mais de 3 dias.
+# Roda todo dia às 9h BRT (12h UTC) e apaga, em todos os
+# repos da org, TODA branch sem commit há mais de 3 dias —
+# mergeada ou não — exceto:
+#   - main, develop e a branch padrão do repo
+#   - branches usadas por PR aberto (head ou base)
+#   - branches com proteção do GitHub
+# O SHA de cada branch apagada vai para o log/summary, para
+# restauração (ver "Como restaurar" no summary do run).
 # Usa BOT_PAT para ter acesso de escrita em toda a org.
 # ============================================================
 
@@ -23,9 +28,13 @@ on:
         required: false
         default: '3'
 
+concurrency:
+  group: org-cleanup-branches
+  cancel-in-progress: false
+
 jobs:
   cleanup:
-    name: Delete merged stale branches
+    name: Delete stale branches
     runs-on: ubuntu-latest
 
     steps:
@@ -39,25 +48,37 @@ jobs:
           set +e  # Não sair em erro — tratamento manual abaixo
 
           CUTOFF=$(date -d "${DAYS} days ago" +%s)
-          PROTECTED="^(main|master|develop|development|dev|staging|homolog|homologacao|release|hotfix)$|^(release|hotfix|feature-base|develop)/"
+          KEEP="^(main|develop)$"
 
           TOTAL_DELETED=0
-          TOTAL_SKIPPED=0
+          TOTAL_ERRORS=0
           TOTAL_REPOS=0
+          TOTAL_REPOS_SKIPPED=0
+
+          # Codifica o nome da branch para URL, preservando as barras
+          urlenc() { printf '%s' "$1" | jq -sRr @uri | sed 's|%2F|/|g'; }
+
+          SUMMARY=${GITHUB_STEP_SUMMARY:-/dev/null}
+          if [ "$DRY_RUN" == "true" ]; then MODE="Simulação (dry run)"; else MODE="Execução real"; fi
+          {
+            echo "## Org Branch Cleanup — ${MODE}"
+            echo "Threshold: **${DAYS} dias** sem commit. Mantidas: main, develop, branch padrão, branches de PR aberto e branches protegidas."
+            echo ""
+            echo "| Repo | Branch | Dias | SHA |"
+            echo "|---|---|---|---|"
+          } >> "$SUMMARY"
 
           echo "========================================"
           echo " Org Branch Cleanup — $(date '+%Y-%m-%d %H:%M UTC')"
           echo " Threshold: ${DAYS} dias | Dry run: ${DRY_RUN}"
           echo "========================================"
 
-          # Valida token antes de prosseguir
           echo "Verificando credenciais..."
           gh api user --jq '.login' || { echo "ERRO: BOT_PAT inválido ou sem permissão."; exit 1; }
 
           repos=$(gh api "orgs/$ORG/repos?per_page=100&type=all" \
             --paginate \
             --jq '.[] | select(.archived == false) | .name' 2>&1)
-
           if [ $? -ne 0 ]; then
             echo "ERRO ao listar repos da org: $repos"
             exit 1
@@ -66,56 +87,83 @@ jobs:
           for repo in $repos; do
             ((TOTAL_REPOS++))
 
-            # Pega o branch padrão
-            default_branch=$(gh api "repos/$ORG/$repo" --jq '.default_branch' 2>/dev/null)
-            [ -z "$default_branch" ] && continue
+            default_branch=$(gh api "repos/$ORG/$repo" --jq '.default_branch' 2>&1)
+            if [ $? -ne 0 ] || [ -z "$default_branch" ]; then
+              echo "  ⚠ $repo: não consegui ler a branch padrão — repo pulado ($default_branch)"
+              ((TOTAL_REPOS_SKIPPED++))
+              continue
+            fi
 
-            # Lista branches (exceto o próprio default e os protegidos)
+            # Branches envolvidas em PR aberto: head (mesmo repo) e base.
+            # Se a listagem falhar, o repo é pulado — nunca apagar sem saber.
+            open_pr_refs=$(gh api "repos/$ORG/$repo/pulls?state=open&per_page=100" \
+              --paginate \
+              --jq ".[] | (select(.head.repo.full_name == \"$ORG/$repo\") | .head.ref), .base.ref" 2>&1)
+            if [ $? -ne 0 ]; then
+              echo "  ⚠ $repo: falha ao listar PRs abertos — repo pulado ($open_pr_refs)"
+              ((TOTAL_REPOS_SKIPPED++))
+              continue
+            fi
+
+            # Branches não protegidas (proteção do GitHub impede a deleção)
             branches=$(gh api "repos/$ORG/$repo/branches?per_page=100" \
               --paginate \
-              --jq '.[] | .name' 2>/dev/null | \
-              jq -Rr --arg def "$default_branch" --arg pat "$PROTECTED" \
-              'select(. != $def and (test($pat) | not))')
+              --jq '.[] | select(.protected | not) | .name' 2>&1)
+            if [ $? -ne 0 ]; then
+              echo "  ⚠ $repo: falha ao listar branches — repo pulado ($branches)"
+              ((TOTAL_REPOS_SKIPPED++))
+              continue
+            fi
 
             for branch in $branches; do
-              # Data do último commit na branch
-              last_commit_date=$(gh api \
-                "repos/$ORG/$repo/commits?sha=$branch&per_page=1" \
-                --jq '.[0].commit.committer.date' 2>/dev/null)
+              [ "$branch" == "$default_branch" ] && continue
+              [[ "$branch" =~ $KEEP ]] && continue
+              if grep -qxF -- "$branch" <<< "$open_pr_refs"; then
+                continue
+              fi
 
-              [ -z "$last_commit_date" ] && continue
+              enc=$(urlenc "$branch")
+              info=$(gh api "repos/$ORG/$repo/branches/$enc" \
+                --jq '"\(.commit.sha) \(.commit.commit.committer.date)"' 2>&1)
+              if [ $? -ne 0 ]; then
+                echo "  ✗ Erro lendo $repo/$branch — $info"
+                ((TOTAL_ERRORS++))
+                continue
+              fi
+              sha=${info%% *}
+              last_commit_date=${info#* }
 
               last_ts=$(date -d "$last_commit_date" +%s 2>/dev/null)
               [ -z "$last_ts" ] && continue
+              [ "$last_ts" -ge "$CUTOFF" ] && continue
 
-              if [ "$last_ts" -lt "$CUTOFF" ]; then
-                # Verifica se foi mergeada no default branch
-                merged=$(gh api \
-                  "repos/$ORG/$repo/compare/$default_branch...$branch" \
-                  --jq '.status' 2>/dev/null)
+              age_days=$(( ( $(date +%s) - last_ts ) / 86400 ))
 
-                # "behind" ou "identical" = branch mergeada (default tem tudo dela)
-                if [[ "$merged" == "behind" || "$merged" == "identical" ]]; then
-                  age_days=$(( ( $(date +%s) - last_ts ) / 86400 ))
-
-                  if [ "$DRY_RUN" == "true" ]; then
-                    echo "  [DRY RUN] $repo/$branch (${age_days}d sem atividade)"
-                    ((TOTAL_DELETED++))
-                  else
-                    result=$(gh api -X DELETE \
-                      "repos/$ORG/$repo/git/refs/heads/$branch" 2>&1)
-                    if [ $? -eq 0 ]; then
-                      echo "  ✓ Deletada: $repo/$branch (${age_days}d)"
-                      ((TOTAL_DELETED++))
-                    else
-                      echo "  ✗ Erro: $repo/$branch — $result"
-                      ((TOTAL_SKIPPED++))
-                    fi
-                  fi
+              if [ "$DRY_RUN" == "true" ]; then
+                echo "  [DRY RUN] $repo/$branch (${age_days}d) sha=$sha"
+                echo "| $repo | \`$branch\` | $age_days | \`$sha\` |" >> "$SUMMARY"
+                ((TOTAL_DELETED++))
+              else
+                result=$(gh api -X DELETE "repos/$ORG/$repo/git/refs/heads/$enc" 2>&1)
+                if [ $? -eq 0 ]; then
+                  echo "  ✓ Deletada: $repo/$branch (${age_days}d) sha=$sha"
+                  echo "| $repo | \`$branch\` | $age_days | \`$sha\` |" >> "$SUMMARY"
+                  ((TOTAL_DELETED++))
+                else
+                  echo "  ✗ Erro: $repo/$branch — $result"
+                  ((TOTAL_ERRORS++))
                 fi
               fi
             done
           done
+
+          {
+            echo ""
+            echo "**Total:** ${TOTAL_DELETED} branches | Erros: ${TOTAL_ERRORS} | Repos: ${TOTAL_REPOS} (pulados: ${TOTAL_REPOS_SKIPPED})"
+            echo ""
+            echo "### Como restaurar"
+            echo '`gh api -X POST repos/'"$ORG"'/<repo>/git/refs -f ref=refs/heads/<branch> -f sha=<sha>`'
+          } >> "$SUMMARY"
 
           echo ""
           echo "========================================"
@@ -124,6 +172,9 @@ jobs:
             echo " Seriam apagadas: ${TOTAL_DELETED} branches em ${TOTAL_REPOS} repos"
           else
             echo " Limpeza concluída."
-            echo " Apagadas: ${TOTAL_DELETED} | Erros: ${TOTAL_SKIPPED} | Repos: ${TOTAL_REPOS}"
+            echo " Apagadas: ${TOTAL_DELETED} | Erros: ${TOTAL_ERRORS} | Repos: ${TOTAL_REPOS}"
           fi
+          echo " Repos pulados por erro: ${TOTAL_REPOS_SKIPPED}"
           echo "========================================"
+
+          [ "$TOTAL_ERRORS" -eq 0 ] && [ "$TOTAL_REPOS_SKIPPED" -eq 0 ] || exit 1
