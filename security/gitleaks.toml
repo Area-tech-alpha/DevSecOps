@@ -17,31 +17,39 @@ title = "Alpha DevSecOps — Gitleaks Config"
 [[rules]]
 id = "generic-api-key-assignment"
 description = "Hardcoded API keys / tokens / secrets (valor sem espaços, min 16 chars)"
-regex = '''(?i)\b(api[_-]?key|secret[_-]?key|client[_-]?secret|auth[_-]?token|access[_-]?token|bearer[_-]?token|jwt[_-]?secret|signing[_-]?secret|encryption[_-]?key|private[_-]?key|webhook[_-]?secret|service[_-]?key|master[_-]?key|app[_-]?secret|session[_-]?secret|twilio[_-]?(?:auth[_-]?token|sid)|stripe[_-]?(?:secret|key)|openai[_-]?(?:key|api[_-]?key)|sendgrid[_-]?(?:key|api[_-]?key)|slack[_-]?(?:token|secret|signing))\s*[:=]\s*['"][^'"\s]{16,}['"]'''
+# Sem \b no início: pega nomes com prefixo (GOOGLE_API_KEY, stripeSecretKey).
+# ['"]? antes do [:=]: chave entre aspas (JSON, dict Python). Aceita crase (template literal).
+regex = '''(?i)(api[_-]?key|secret[_-]?key|client[_-]?secret|auth[_-]?token|access[_-]?token|bearer[_-]?token|jwt[_-]?secret|signing[_-]?secret|encryption[_-]?key|private[_-]?key|webhook[_-]?secret|service[_-]?key|master[_-]?key|app[_-]?secret|session[_-]?secret|twilio[_-]?(?:auth[_-]?token|sid)|stripe[_-]?(?:secret|key)|openai[_-]?(?:key|api[_-]?key)|sendgrid[_-]?(?:key|api[_-]?key)|slack[_-]?(?:token|secret|signing))['"]?\s*[:=]\s*['"`][^'"`\s]{16,}['"`]'''
 tags = ["key", "API", "generic"]
 
 [[rules.allowlists]]
-description = "Placeholders e valores de exemplo"
+description = "Placeholders, valores de exemplo e template literal lido do ambiente"
 regexTarget = "match"
 regexes = [
-    '''(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx|TODO|FIXME|REPLACE)''',
+    '''(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx|TODO|FIXME|REPLACE|exemplo|qualquer|seu[_-]|sua[_-])''',
+    '''\$\{''',
+    # Valor que é nome (de env var / header) em MAIÚSCULO, não a chave
+    '''[:=]\s*['"`][A-Z][A-Z_-]+['"`]''',
 ]
 
 [[rules]]
 id = "generic-password-assignment"
 description = "Hardcoded passwords — palavra inteira, não substring em chaves compostas"
-regex = '''(?i)\b(password|passwd|pwd|senha|db_pass(?:word)?|database_password|smtp_pass(?:word)?|redis_pass(?:word)?|mysql_pass(?:word)?|pg_pass(?:word)?|mongo_pass(?:word)?)\b\s*[:=]\s*['"][^'"\s]{8,}['"]'''
+# Sem \b no início: pega ADMIN_PASSWORD, adminPassword, POSTGRES_PASSWORD.
+# \b no fim mantém passwordHash / passwordResetToken de fora.
+regex = '''(?i)(password|passwd|pwd|senha|(?:db|smtp|redis|mysql|pg|mongo)_pass)\b['"]?\s*[:=]\s*['"`][^'"`\s]{8,}['"`]'''
 tags = ["password", "generic"]
 
 [[rules.allowlists]]
-description = "Labels de auditoria/UI em PT-BR (não são credenciais)"
-regexTarget = "line"
+description = "Placeholders, metadados de senha (PT-BR), datas e nomes de campo como valor"
+# Alvo "match" (não "line"): um label na mesma linha não pode esconder uma senha real.
+regexTarget = "match"
 regexes = [
-    '''(?i)['"][^'"]*(?:atualiza[çc][ãa]o|altera[çc][ãa]o|mudan[çc]a|redefini[çc][ãa]o|troca|reset)\s+de\s+senha[^'"]*['"]''',
-    '''(?i)['"][^'"]*\bsenha\s+de\s+usu[aá]rio[^'"]*['"]''',
-    '''(?i)\b\w*senha\w*\s*[:=]\s*['"][^'"]*\s[^'"]{4,}['"]''',
-    '''(?i)\b(?:atualizacao|alteracao|historico|tipo)_senha\s*[:=]''',
-    '''(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx)''',
+    '''(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx|exemplo|qualquer|seu[_-]|sua[_-])''',
+    '''(?i)(atualiza[cç][aã]o|altera[cç][aã]o|hist[oó]rico|tipo|data|dt|ultima|expira[cç][aã]o|troca|reset|redefini[cç][aã]o)_?senha''',
+    '''[:=]\s*['"`]\d{4}-\d{2}-\d{2}''',
+    '''(?i)[:=]\s*['"`][^'"`]*(?:password|passwd|senha)[^'"`]*['"`]''',
+    '''\$\{''',
 ]
 
 [[rules]]
@@ -54,7 +62,7 @@ tags = ["key", "secret", "const"]
 description = "Placeholders"
 regexTarget = "match"
 regexes = [
-    '''(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx|TODO|FIXME|REPLACE)''',
+    '''(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx|TODO|FIXME|REPLACE|exemplo|qualquer|seu[_-]|sua[_-])''',
 ]
 
 [[rules]]
@@ -103,7 +111,7 @@ tags = ["slack", "token"]
 [[rules]]
 id = "twilio-api-key"
 description = "Twilio API Key (SK) ou Account SID (AC)"
-regex = '''(?:SK|AC)[0-9a-fA-F]{32}'''
+regex = '''\b(?:SK|AC)[0-9a-fA-F]{32}\b'''
 tags = ["twilio", "key"]
 
 [[rules]]
@@ -161,6 +169,8 @@ regexes = [
     '''(?i)(localhost|127\.0\.0\.1|0\.0\.0\.0|::1|host\.docker\.internal)''',
     '''(?i)(user:pass|username:password|admin:admin|root:root)''',
     '''(?i)(example|placeholder|dummy|changeme)''',
+    # Valor montado em runtime / placeholder: ${VAR}, $VAR, <senha>, {{var}}, %(var)s
+    '''(?:\$\{|\$[A-Z_]{3,}|<[^<>\s]+>|\{\{|%\(|%s)''',
 ]
 
 # ══════════════════════════════════════════
@@ -169,34 +179,37 @@ regexes = [
 
 [allowlist]
 description = "Exemplos, testes, docs, lockfiles e valores placeholder"
+# Caminhos ancorados em segmento de diretório: (?:^|/)tests?/ casa "tests/" e
+# "src/test/", mas NÃO "latest/" ou "contest/" (antes casava e escondia segredos).
 paths = [
     '''(?i)\.env\.example$''',
     '''(?i)\.env\.sample$''',
-    '''(?i)tests?/''',
-    '''(?i)__tests__/''',
-    '''(?i)fixtures/''',
-    '''(?i)stubs/''',
+    '''(?i)(?:^|/)tests?/''',
+    '''(?i)(?:^|/)testing/''',
+    '''(?i)(?:^|/)__tests__/''',
+    '''(?i)(?:^|/)fixtures/''',
+    '''(?i)(?:^|/)stubs/''',
     '''(?i)\.spec\.(ts|tsx|js|jsx)$''',
     '''(?i)\.test\.(ts|tsx|js|jsx)$''',
     '''(?i)\.stories\.(ts|tsx|js|jsx)$''',
-    '''(?i)e2e/''',
-    '''(?i)cypress/''',
-    '''(?i)playwright/''',
-    '''(?i)README\.md$''',
-    '''(?i)docs/.*\.md$''',
-    '''(?i)pnpm-lock\.yaml$''',
-    '''(?i)package-lock\.json$''',
-    '''(?i)yarn\.lock$''',
-    '''(?i)devsecops/''',
+    # Qualquer diretório com "e2e" no nome (e2e/, users-e2e/). "test" não: casaria latest/.
+    '''(?i)(?:^|/)[^/]*e2e[^/]*/''',
+    '''(?i)(?:^|/)cypress/''',
+    '''(?i)(?:^|/)playwright/''',
+    '''(?i)(?:^|/)README\.md$''',
+    '''(?i)(?:^|/)docs/.*\.md$''',
+    '''(?i)(?:^|/)pnpm-lock\.yaml$''',
+    '''(?i)(?:^|/)package-lock\.json$''',
+    '''(?i)(?:^|/)yarn\.lock$''',
+    '''(?i)(?:^|/)devsecops/''',
     '''(?i)_test\.go$''',
-    '''(?i)testdata/''',
-    '''(?i)go\.sum$''',
-    '''(?i)test_.*\.py$''',
-    '''(?i).*_test\.py$''',
-    '''(?i)conftest\.py$''',
-    '''(?i)poetry\.lock$''',
-    '''(?i)mock/''',
-    '''(?i)mocks/''',
+    '''(?i)(?:^|/)testdata/''',
+    '''(?i)(?:^|/)go\.sum$''',
+    '''(?i)(?:^|/)test_[^/]*\.py$''',
+    '''(?i)_test\.py$''',
+    '''(?i)(?:^|/)conftest\.py$''',
+    '''(?i)(?:^|/)poetry\.lock$''',
+    '''(?i)(?:^|/)mocks?/''',
 ]
 regexes = [
     '''(?i)['"][^'"]*(?:atualiza[çc][ãa]o|altera[çc][ãa]o)\s+de\s+senha[^'"]*['"]''',

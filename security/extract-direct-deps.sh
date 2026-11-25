@@ -64,6 +64,8 @@ elif [ -f requirements.txt ]; then
     line="${line%%#*}"
     line=$(echo "$line" | tr -d '[:space:]')
     [ -z "$line" ] && continue
+    # Opções do pip (-r, -e, --index-url...) não são pacotes
+    [[ "$line" == -* ]] && continue
     dep="${line%%[<>=!~;[]*}"
     dep="${dep%%@*}"
     [ -n "$dep" ] && names+=("$dep")

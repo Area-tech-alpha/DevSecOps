@@ -13,12 +13,16 @@ rules:
   # ══════════════════════════════════════════
   - id: devsecops.security.hardcoded-api-key
     patterns:
-      - pattern-regex: '(?i)\b(api[_-]?key|secret[_-]?key|client[_-]?secret|auth[_-]?token|access[_-]?token|bearer[_-]?token|jwt[_-]?secret|signing[_-]?secret|encryption[_-]?key|private[_-]?key|webhook[_-]?secret|service[_-]?key|master[_-]?key|app[_-]?secret|session[_-]?secret|twilio[_-]?(?:auth[_-]?token|sid)|stripe[_-]?(?:secret|key)|openai[_-]?(?:key|api[_-]?key)|sendgrid[_-]?(?:key|api[_-]?key)|slack[_-]?(?:token|secret|signing))\s*[:=]\s*[''""`]([A-Za-z0-9_\-+=!@#$%^&*./]{16,})[''""`]'
+      # Sem \b no início: pega nomes com prefixo (GOOGLE_API_KEY, stripeSecretKey).
+      # [''""]? antes do [:=]: pega chave entre aspas (JSON, dict Python).
+      - pattern-regex: '(?i)(api[_-]?key|secret[_-]?key|client[_-]?secret|auth[_-]?token|access[_-]?token|bearer[_-]?token|jwt[_-]?secret|signing[_-]?secret|encryption[_-]?key|private[_-]?key|webhook[_-]?secret|service[_-]?key|master[_-]?key|app[_-]?secret|session[_-]?secret|twilio[_-]?(?:auth[_-]?token|sid)|stripe[_-]?(?:secret|key)|openai[_-]?(?:key|api[_-]?key)|sendgrid[_-]?(?:key|api[_-]?key)|slack[_-]?(?:token|secret|signing))[''""]?\s*[:=]\s*[''""`]([A-Za-z0-9_\-+=!@#$%^&*./]{16,})[''""`]'
       - pattern-not-regex: '(?i)process\.env\.'
       - pattern-not-regex: '(?i)os\.(?:environ|getenv)'
-      - pattern-not-regex: '(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx|TODO|FIXME|REPLACE)'
+      - pattern-not-regex: '(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx|TODO|FIXME|REPLACE|exemplo|qualquer|seu[_-]|sua[_-])'
       - pattern-not-regex: '(?i)\$\{|`\$\{'
       - pattern-not-regex: '(?i)configService\.get'
+      # Valor que é nome (de env var / header) em MAIÚSCULO, não a chave: API_KEY = 'OPENAI_API_KEY'
+      - pattern-not-regex: '[:=]\s*[''""`][A-Z][A-Z_-]+[''""`]'
     message: >-
       Chave de API, token ou secret hardcoded detectado.
       Use variáveis de ambiente ou um secret manager (Vault, AWS Secrets Manager).
@@ -26,6 +30,9 @@ rules:
     severity: ERROR
     paths:
       exclude:
+        # Docs: nome + valor fictício é o normal. Regras por formato seguem valendo em .md
+        - "*.md"
+        - "*.mdx"
         - "*.example"
         - "*.sample"
         - ".env.example"
@@ -51,6 +58,7 @@ rules:
         - "**/fixtures/**"
         - "**/stubs/**"
         - "**/e2e/**"
+        - "**/*e2e*/**"
         - "**/cypress/**"
         - "**/playwright/**"
         - "**/devsecops/**"
@@ -101,6 +109,7 @@ rules:
         - "**/fixtures/**"
         - "**/stubs/**"
         - "**/e2e/**"
+        - "**/*e2e*/**"
         - "**/cypress/**"
         - "**/playwright/**"
         - "**/devsecops/**"
@@ -115,21 +124,32 @@ rules:
   # ══════════════════════════════════════════
   - id: devsecops.security.hardcoded-password
     patterns:
-      - pattern-regex: '(?i)\b(password|passwd|pwd|senha|db_pass|db_password|database_password|smtp_password|smtp_pass|redis_password|redis_pass|mysql_password|pg_password|mongo_password)\b\s*[:=]\s*[''""`]([^''""`\s]{8,})[''""`]'
+      # Sem \b no início: pega ADMIN_PASSWORD, adminPassword, POSTGRES_PASSWORD.
+      # \b no fim mantém passwordHash / passwordResetToken de fora.
+      - pattern-regex: '(?i)(password|passwd|pwd|senha|(?:db|smtp|redis|mysql|pg|mongo)_pass)\b[''""]?\s*[:=]\s*[''""`]([^''""`\s]{8,})[''""`]'
       - pattern-not-regex: '(?i)process\.env\.'
       - pattern-not-regex: '(?i)os\.(?:environ|getenv)'
-      - pattern-not-regex: '(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx|TODO|FIXME|REPLACE)'
+      - pattern-not-regex: '(?i)(example|placeholder|dummy|changeme|your[_-]|test[_-]|fake[_-]|sample|xxxx|TODO|FIXME|REPLACE|exemplo|qualquer|seu[_-]|sua[_-])'
       - pattern-not-regex: '(?i)\$\{|`\$\{'
       - pattern-not-regex: '(?i)configService\.get'
       # Exclusão de labels PT-BR (UI de "alteração de senha" etc.)
       - pattern-not-regex: '(?i)(atualiza[çc][ãa]o|altera[çc][ãa]o|mudan[çc]a|redefini[çc][ãa]o|troca|reset|hist[óo]rico|tipo)\s+de\s+senha'
       - pattern-not-regex: '(?i)senha\s+de\s+usu[aá]rio'
+      # Campos de metadado de senha (auditoria PT-BR): atualizacao_senha, dataTrocaSenha...
+      - pattern-not-regex: '(?i)(atualiza[cç][aã]o|altera[cç][aã]o|hist[oó]rico|tipo|data|dt|ultima|expira[cç][aã]o|troca|reset|redefini[cç][aã]o)_?senha'
+      # Valor que é data/timestamp não é senha.
+      - pattern-not-regex: '[:=]\s*[''""`]\d{4}-\d{2}-\d{2}'
+      # Nome de campo / rota como valor: { confirmPassword: "confirm_password" }, "/auth/forgot-password"
+      - pattern-not-regex: '(?i)[:=]\s*[''""`][^''""`]*(?:password|passwd|senha)[^''""`]*[''""`]'
     message: >-
       Password hardcoded detectado. Use variáveis de ambiente ou um secret manager.
     languages: [generic]
     severity: ERROR
     paths:
       exclude:
+        # Docs: nome + valor fictício é o normal. Regras por formato seguem valendo em .md
+        - "*.md"
+        - "*.mdx"
         - "*.example"
         - "*.sample"
         - ".env.example"
@@ -158,6 +178,7 @@ rules:
         - "**/fixtures/**"
         - "**/stubs/**"
         - "**/e2e/**"
+        - "**/*e2e*/**"
         - "**/cypress/**"
         - "**/playwright/**"
         - "**/devsecops/**"
@@ -172,10 +193,14 @@ rules:
   # ══════════════════════════════════════════
   - id: devsecops.security.hardcoded-connection-string
     patterns:
-      - pattern-regex: '(?i)\b(database_url|connection_string|mongo_uri|redis_url|postgres_url|mysql_url|db_uri|db_url|db_connection|mongo_connection|pg_connection|pg_connection_string|supabase_url|amqp_url|rabbit_url|rabbitmq_url|connection_url|database_uri|sql_connection)\s*[:=]\s*[''""`]([^''""`]{20,})[''""`]'
+      # Só dispara se o valor tiver credencial (user:pass@host ou Password=/pwd=).
+      # URL sem credencial (redis://cache:6379, URL do Supabase) é config, não segredo.
+      - pattern-regex: '(?i)(database_url|connection_string|mongo_uri|redis_url|postgres_url|mysql_url|db_uri|db_url|db_connection|mongo_connection|pg_connection|pg_connection_string|amqp_url|rabbit_url|rabbitmq_url|connection_url|database_uri|sql_connection)[''""]?\s*[:=]\s*[''""`]([^''""`]*(?::[^@\s/''""`]+@|password=|pwd=)[^''""`]*)[''""`]'
       - pattern-not-regex: '(?i)process\.env\.'
       - pattern-not-regex: '(?i)os\.(?:environ|getenv)'
       - pattern-not-regex: '(?i)(example|placeholder|localhost|127\.0\.0\.1|0\.0\.0\.0|::1|host\.docker\.internal)'
+      # Valor montado em tempo de execução / placeholder: ${VAR}, $VAR, <senha>, {{var}}, %(var)s
+      - pattern-not-regex: '(?:\$\{|\$[A-Z_]{3,}|<[^<>\s]+>|\{\{|%\(|%s)'
       - pattern-not-regex: '(?i)\$\{|`\$\{'
       - pattern-not-regex: '(?i)configService\.get'
     message: >-
@@ -184,6 +209,9 @@ rules:
     severity: ERROR
     paths:
       exclude:
+        # Docs: nome + valor fictício é o normal. Regras por formato seguem valendo em .md
+        - "*.md"
+        - "*.mdx"
         - "*.example"
         - "*.sample"
         - ".env.example"
@@ -209,6 +237,7 @@ rules:
         - "**/fixtures/**"
         - "**/stubs/**"
         - "**/e2e/**"
+        - "**/*e2e*/**"
         - "**/cypress/**"
         - "**/playwright/**"
         - "**/devsecops/**"
@@ -230,6 +259,8 @@ rules:
           (?i)(postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis(?:s)?|amqps?)://[^:\s'""`]+:[^@\s'""`]+@[^\s'""`]+
       - pattern-not-regex: '(?i)(localhost|127\.0\.0\.1|0\.0\.0\.0|::1|host\.docker\.internal)'
       - pattern-not-regex: '(?i)(example|placeholder|user:pass|username:password|admin:admin|root:root)'
+      # Valor montado em tempo de execução / placeholder: ${VAR}, $VAR, <senha>, {{var}}, %(var)s
+      - pattern-not-regex: '(?:\$\{|\$[A-Z_]{3,}|<[^<>\s]+>|\{\{|%\(|%s)'
     message: >-
       Connection string com credenciais embutidas detectada (user:pass@host).
       Use variáveis de ambiente e nunca inclua credenciais diretamente na URI.
@@ -262,6 +293,7 @@ rules:
         - "**/fixtures/**"
         - "**/stubs/**"
         - "**/e2e/**"
+        - "**/*e2e*/**"
         - "**/cypress/**"
         - "**/playwright/**"
         - "**/devsecops/**"
@@ -311,6 +343,7 @@ rules:
         - "**/fixtures/**"
         - "**/stubs/**"
         - "**/e2e/**"
+        - "**/*e2e*/**"
         - "**/cypress/**"
         - "**/playwright/**"
         - "**/devsecops/**"
@@ -358,6 +391,7 @@ rules:
         - "**/fixtures/**"
         - "**/stubs/**"
         - "**/e2e/**"
+        - "**/*e2e*/**"
         - "**/cypress/**"
         - "**/playwright/**"
         - "**/devsecops/**"
