@@ -1,0 +1,77 @@
+name: Security Rules Tests
+
+# ============================================================
+# Testes das regras de segurança (Semgrep, Gitleaks, deps diretas).
+#
+# Roda SOMENTE no repo DevSecOps. As configs em security/ são
+# lidas da main por todos os repos da org (Required Workflow),
+# então uma regra quebrada que chegue na main afeta a org inteira
+# no mesmo instante. Configure este check como obrigatório na
+# branch main do DevSecOps.
+#
+# Rodar localmente: python3 security/tests/run_tests.py -v
+# ============================================================
+
+on:
+  pull_request:
+    paths:
+      - "security/**"
+      - ".github/workflows/alpha-security.yaml"
+      - ".github/workflows/security-rules-tests.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "security/**"
+      - ".github/workflows/alpha-security.yaml"
+      - ".github/workflows/security-rules-tests.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: security-rules-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rules:
+    name: "🧪 Security Rules Tests"
+    # Nunca roda fora do DevSecOps, mesmo se for referenciado por outro repo.
+    if: github.repository == 'Area-tech-alpha/DevSecOps'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      # Mantenha alinhado com as versões usadas no alpha-security.yaml.
+      GITLEAKS_VERSION: 8.30.1
+      SEMGREP_VERSION: 1.177.0
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Semgrep
+        run: pip install --quiet "semgrep==${SEMGREP_VERSION}"
+
+      - name: Install Gitleaks
+        run: |
+          set -euo pipefail
+          BASE_URL="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          ASSET="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          SUMS="gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          for FILE in "$ASSET" "$SUMS"; do
+            curl -fsSL --retry 3 --retry-delay 5 "${BASE_URL}/${FILE}" -o "$FILE"
+          done
+          grep -E "[[:space:]]${ASSET}\$" "$SUMS" > "${ASSET}.sha256"
+          sha256sum -c "${ASSET}.sha256"
+          tar -xzf "$ASSET" gitleaks
+          sudo mv gitleaks /usr/local/bin/
+          rm -f "$ASSET" "$SUMS" "${ASSET}.sha256"
+          gitleaks version
+
+      - name: Run rule tests
+        run: python3 security/tests/run_tests.py -v

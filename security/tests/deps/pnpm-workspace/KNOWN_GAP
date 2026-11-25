@@ -1,0 +1,1 @@
+Monorepo (workspaces): só o package.json da raiz é lido; deps de apps/* viram 'transitivas' e não bloqueiam.

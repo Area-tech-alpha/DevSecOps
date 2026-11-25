@@ -1,0 +1,8 @@
+# comentário
+-r base.txt
+--index-url https://pypi.org/simple
+Django>=4.2,<5   # web
+requests[security]==2.32.3
+fastapi ; python_version >= "3.10"
+uvicorn~=0.30
+-e git+https://github.com/org/pkg.git#egg=pkg
