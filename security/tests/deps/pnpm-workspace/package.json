@@ -1,0 +1,1 @@
+{ "name": "monorepo", "private": true, "devDependencies": { "turbo": "^2.0.0" } }

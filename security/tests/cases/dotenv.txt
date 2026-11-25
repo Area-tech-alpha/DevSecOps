@@ -1,0 +1,12 @@
+# path: .env.production
+# Arquivo .env commitado: valores costumam vir SEM aspas.
+# todoruleid: devsecops.security.hardcoded-api-key, generic-api-key-assignment
+JWT_SECRET={{rand:32}}
+# todoruleid: devsecops.security.hardcoded-password, generic-password-assignment
+DB_PASSWORD={{rand:16}}
+# ruleid: devsecops.security.connection-string-by-uri, connection-string-with-credentials
+DATABASE_URL=postgresql://app:{{rand:16}}@db.prod.internal:5432/app
+# ruleid: devsecops.security.provider-specific-secret, stripe-secret
+STRIPE_KEY=sk_live_{{rand:32}}
+# ok: devsecops.security.hardcoded-api-key, generic-api-key-assignment
+NEXT_PUBLIC_APP_NAME=minha-aplicacao
